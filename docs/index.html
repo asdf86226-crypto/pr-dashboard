@@ -96,8 +96,9 @@
   .stamp .sync-at{color:var(--faint); font-weight:600; margin-left:8px}
 
   /* ---------- 현황판(콘솔) ---------- */
-  .toprow{margin:16px 24px -6px; display:flex; justify-content:flex-end; align-items:stretch; gap:8px; flex-wrap:wrap}
-  .toprow label{cursor:pointer}
+  .toprow{margin:16px 24px -6px; display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:wrap}
+  /* 이모지 글자 높이가 달라 줄 높이가 밀리므로 높이를 고정해 둘을 같게 만든다 */
+  .toprow .linkbtn{height:32px; padding:0 12px; cursor:pointer}
   @media (max-width:700px){ .toprow{margin:14px 14px -6px} }
   .console{
     background:var(--surface-2); border:1px solid var(--border); border-radius:12px;
