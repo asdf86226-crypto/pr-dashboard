@@ -96,6 +96,9 @@
   .stamp .sync-at{color:var(--faint); font-weight:600; margin-left:8px}
 
   /* ---------- 현황판(콘솔) ---------- */
+  .toprow{margin:16px 24px -6px; display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap}
+  .toprow label{cursor:pointer}
+  @media (max-width:700px){ .toprow{margin:14px 14px -6px} }
   .console{
     background:var(--surface-2); border:1px solid var(--border); border-radius:12px;
     margin:18px 24px 0; padding:20px 22px;
@@ -515,6 +518,12 @@
   <span>⚠️ 지금은 <b>이 브라우저에만</b> 저장됩니다. 팀원과 함께 쓰려면 구글 시트에 연결하세요.</span>
   <span class="grow"></span>
   <button id="bannerSetup">구글 시트 연결</button>
+</div>
+
+<div class="toprow">
+  <button class="linkbtn" id="backupBtn" title="구매요청 전체를 되살릴 수 있는 형태로 파일에 저장합니다">💾 저장하기 (JSON 백업)</button>
+  <label class="linkbtn" id="restoreBtn" for="restoreInput" title="백업 파일에서 되살립니다. 이미 있는 요청은 건너뜁니다">📥 불러오기 (JSON 복원)</label>
+  <input type="file" id="restoreInput" accept=".json,application/json" hidden>
 </div>
 
 <div class="console">
@@ -1405,10 +1414,6 @@ function erpBlob_(){
         <span class="lg-note">소진 예상</span>
       </span>
       <button class="linkbtn" id="exportBtn">⬇ CSV 내보내기</button>
-      <button class="linkbtn" id="backupBtn" title="구매요청 전체를 되살릴 수 있는 형태로 파일에 저장합니다">💾 백업 저장</button>
-      <label class="linkbtn" id="restoreBtn" for="restoreInput" style="cursor:pointer"
-             title="백업 파일에서 되살립니다. 이미 있는 요청은 건너뜁니다">📥 백업 복원</label>
-      <input type="file" id="restoreInput" accept=".json,application/json" hidden>
       <button class="linkbtn danger" id="clearBtn">전체 삭제</button>
     </div>
   </section>
