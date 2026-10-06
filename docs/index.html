@@ -587,6 +587,22 @@ function doPost(e){ const b=JSON.parse(e.postData.contents||'{}');
     try{ notify_(b.items||[]); }catch(err){} }
   else if(b.action==='remove'){ for(let i=1;i&lt;v.length;i++){ if(v[i][idc]===b.id){ s.deleteRow(i+1); break; } } }
   else if(b.action==='clear'){ if(s.getLastRow()&gt;1) s.deleteRows(2,s.getLastRow()-1); }
+  // 백업 파일에서 되살리기. id 가 이미 있으면 건너뛰므로 여러 번 보내도 중복되지 않는다.
+  else if(b.action==='restore'){ fixFormat_(s);
+    const have={};
+    for(let i=1;i&lt;v.length;i++){ const id=v[i][idc]; if(id) have[String(id)]=1; }
+    const add=[];
+    (b.rows||[]).forEach(function(r){
+      if(!r) return;
+      const id=String(r.id||'').trim(); if(!id || have[id]) return;
+      if(!String(r.code||'').trim() &amp;&amp; !String(r.itemName||'').trim()) return;
+      have[id]=1;
+      add.push(COLS.map(function(k){ return r[k]!=null?String(r[k]):''; })); });
+    if(add.length){
+      const r0=s.getLastRow()+1, rng=s.getRange(r0,1,add.length,COLS.length);
+      rng.setNumberFormats(add.map(function(){ return COLS.map(function(){ return '@'; }); }));
+      rng.setValues(add); }
+    return json_({ok:true, added:add.length}); }
 
   return json_({ok:true}); }
 // ===== 카카오톡 '나에게 보내기' 접수 알림 =====
@@ -1100,7 +1116,9 @@ function erpBlob_(){
       <p>오른쪽 목록에 <b>모든 팀의 요청이 함께</b> 표시됩니다. 내가 올린 건 바로 나타나고, <b>다른 사람이 올린 내용을 보려면 오른쪽 위 <code>⟳ 새로고침</code></b>을 눌러주세요. 현황판 오른쪽에 <b>몇 시 기준</b>인지 표시됩니다.</p>
       <p>• <b>내 팀만 보기</b> — 목록 위 팀 이름(개발·자재·생산·품질)을 누르면 그 팀만 걸러 봅니다. <b>전체</b>를 누르면 다시 모두 보입니다.<br>
          • <b>찾기·정렬</b> — 검색창에 품목코드나 품명을 넣으면 바로 찾고, 표 제목을 누르면 그 기준으로 정렬됩니다.<br>
-         • <b>엑셀로 받기</b> — 목록 아래 <b>⬇ CSV 내보내기</b>를 누르면 지금 보이는 목록을 파일로 받습니다.</p>
+         • <b>엑셀로 받기</b> — 목록 아래 <b>⬇ CSV 내보내기</b>를 누르면 지금 보이는 목록을 파일로 받습니다.<br>
+         • <b>백업</b> — <b>💾 백업 저장</b>은 되살릴 수 있는 형태로 파일에 담고, <b>📥 백업 복원</b>은 그 파일에서 되돌립니다.
+           이미 있는 요청은 건너뛰므로 여러 번 눌러도 중복되지 않습니다.</p>
 
       <h3><span class="n">5</span>재고 · 판매량 함께 보기</h3>
       <p>품목코드를 입력하면 <b>바로 아래에</b> 그 품목의 <b>현재고 · 월평균 소요 · 소진 예상</b>이 한 줄로 나타납니다.
@@ -1134,7 +1152,8 @@ function erpBlob_(){
         <span class="ic">⚠</span>
         <span><b>삭제는 모두에게 적용됩니다.</b> 각 줄 끝의 <code>✕</code>를 누르면 그 요청이 <b>모든 사람의 화면에서</b> 사라집니다.
           내가 올린 것이 아니라면 지우지 마시고, 잘못 올렸을 때만 본인 것을 지워주세요.
-          아래쪽 <b>전체 삭제</b>는 되돌릴 수 없으니 누르지 마세요.</span>
+          아래쪽 <b>전체 삭제</b>는 시트의 모든 요청을 지웁니다 — 누르지 마세요.
+          실수로 지웠다면 <b>📥 백업 복원</b> 이나 구글 시트의 <b>파일 → 버전 기록</b>으로 되살릴 수 있습니다.</span>
       </div>
       <div class="g-note warn">
         <span class="ic">!</span>
@@ -1386,6 +1405,10 @@ function erpBlob_(){
         <span class="lg-note">소진 예상</span>
       </span>
       <button class="linkbtn" id="exportBtn">⬇ CSV 내보내기</button>
+      <button class="linkbtn" id="backupBtn" title="구매요청 전체를 되살릴 수 있는 형태로 파일에 저장합니다">💾 백업 저장</button>
+      <label class="linkbtn" id="restoreBtn" for="restoreInput" style="cursor:pointer"
+             title="백업 파일에서 되살립니다. 이미 있는 요청은 건너뜁니다">📥 백업 복원</label>
+      <input type="file" id="restoreInput" accept=".json,application/json" hidden>
       <button class="linkbtn danger" id="clearBtn">전체 삭제</button>
     </div>
   </section>
@@ -2706,6 +2729,51 @@ function erpBlob_(){
     }catch(e){
       toast("저장 실패: "+e.message+" — 키보드 Ctrl+S 로도 저장할 수 있습니다");
     }finally{ b.disabled=false; b.textContent=old; }
+  };
+
+  /* ---------- 백업 저장 / 복원 ---------- */
+  // CSV 는 id 가 없어 되돌릴 수 없다. 백업은 id·접수일까지 그대로 담는다.
+  const BACKUP_KEYS=["id","createdAt","team","code","itemName","qty","dueDate","requester","note"];
+  function backupRow_(d){ const o={}; BACKUP_KEYS.forEach(k=>o[k]=(d[k]!=null?String(d[k]):"")); return o; }
+
+  $("#backupBtn").onclick=()=>{
+    const rows=data.filter(d=>!d._pending && d.id).map(backupRow_);
+    if(!rows.length){ toast("백업할 구매요청이 없습니다"); return; }
+    const body={ v:1, savedAt:new Date().toISOString(), n:rows.length, rows:rows };
+    const url=URL.createObjectURL(new Blob([JSON.stringify(body,null,1)],{type:"application/json"}));
+    const a=document.createElement("a");
+    a.href=url; a.download=`구매요청_백업_${todayISO()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    toast(`${rows.length}건을 백업했습니다`);
+  };
+
+  $("#restoreInput").onchange=async e=>{
+    const f=e.target.files && e.target.files[0];
+    e.target.value="";                       // 같은 파일을 다시 골라도 동작하도록
+    if(!f) return;
+    let j;
+    try{ j=JSON.parse(await f.text()); }
+    catch(err){ toast("백업 파일을 읽지 못했습니다 — JSON 형식이 아닙니다"); return; }
+    const rows=(j && Array.isArray(j.rows)) ? j.rows : null;
+    if(!rows){ toast("구매요청 백업 파일이 아닙니다"); return; }
+    const valid=rows.filter(r=>r && String(r.id||"").trim() && (String(r.code||"").trim()||String(r.itemName||"").trim()));
+    if(!valid.length){ toast("되살릴 내용이 없습니다"); return; }
+    if(store.mode!=="sheet"){ toast("구글 시트에 연결된 상태에서만 복원할 수 있습니다"); return; }
+    if(failStreak>0){ toast("시트 연결이 불안정합니다 — 새로고침 후 다시 시도하세요"); return; }
+    const have={}; data.forEach(d=>{ if(d.id) have[String(d.id)]=1; });
+    const add=valid.filter(r=>!have[String(r.id).trim()]).map(backupRow_);
+    const dup=valid.length-add.length;
+    if(!add.length){ toast(`백업 ${valid.length}건이 모두 이미 들어 있습니다 — 추가된 것 없음`); return; }
+    if(!confirm(`백업 ${valid.length}건 중 ${add.length}건을 되살립니다.`
+      + (dup?`\n이미 있는 ${dup}건은 건너뜁니다.`:"")
+      + `\n\n계속할까요?`)) return;
+    const before=data.length;
+    try{
+      for(let i=0;i<add.length;i+=200)        // 한 번에 많이 보내면 거부당한다
+        await post_("restore",{rows:add.slice(i,i+200)});
+    }catch(err){ toast("복원 실패: "+err.message); return; }
+    toast("되살리는 중입니다 — 잠시 뒤 목록을 확인합니다");
+    setTimeout(async ()=>{ await refresh(); toast(`복원 완료 — ${Math.max(0,data.length-before)}건 추가됨`); }, 4000);
   };
 
   $("#clearBtn").onclick=async ()=>{
