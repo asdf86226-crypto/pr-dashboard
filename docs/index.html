@@ -1483,7 +1483,7 @@ function erpBlob_(){
         </select></div>
       <div class="f"><label>품목구분</label>
         <select id="ordKind">
-          <option value="-alloy">합금 원료 제외</option>
+          <option value="-alloy">합금 원료·잉곳 제외</option>
           <option value="">전체</option>
         </select></div>
       <div class="f"><label>위험 기준(개월)</label><input id="ordRed" type="number" min="0.5" step="0.5" value="2" style="width:92px"></div>
@@ -2839,11 +2839,15 @@ function erpBlob_(){
    * 월평균 소요량은 '실제 판매 + BOM 전개'라, 판매만 보는 것보다 자재·반제품에 정확하다.
    * 음수 재고는 마감 전 조정 수치이므로 급한 발주로 올리지 않고 따로 센다. */
   let ordPage=false;
-  /* 주조(용해)에 들어가는 합금 원료. BOM 소요량이 배합비가 아니라 1 로 들어와 있어
-     수량을 믿을 수 없다 — 비쓰무트는 재고 33인데 월평균이 28,417 로 잡힌다.
-     기본값에서 빼두고, 필요하면 '전체'로 바꿔 볼 수 있게 한다. */
-  const ALLOY=new Set(["Zn","Al","ALB","Pb","Bi","Ni","Sn","CuP","Sb",
-                       "Cu.1","Brass.1","Brass.5","Chip-A"]);
+  /* 주조(용해) 공정에 들어가고 나오는 품목들. BOM 소요량이 배합비가 아니라 1 로
+     들어와 있어 수량을 믿을 수 없다 — 비쓰무트는 재고 33인데 월평균이 28,417 로 잡힌다.
+     기본값에서 빼두고, 필요하면 '전체'로 바꿔 볼 수 있다.
+     빼거나 더할 코드가 생기면 이 목록만 고치면 된다. */
+  const ALLOY=new Set([
+    "Zn","Al","ALB","Pb","Bi","Ni","Sn","CuP","Sb",      // 합금 원료
+    "Cu.1","Brass.1","Brass.5","Chip-A",                 // 동·황동 스크랩, 주물분
+    "INGOT.A","INGOT.B","INGOT.C","C89540"               // 잉곳 (용해 결과물)
+  ]);
   const ordNum=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
 
   function ordRows(){
@@ -2922,7 +2926,7 @@ function erpBlob_(){
       ? `판단 가능한 <b>${rows.length.toLocaleString()}품목</b> 기준 · 소진 예상 = 재고 ÷ 월평균 소요량`
         + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
         + (nChk?` · <span style="color:var(--muted)">재고가 음수인 ${nChk}품목은 마감 전 조정 수치로 보고 맨 뒤로 뺐습니다</span>`:"")
-        + (kind==="-alloy"?` · <span style="color:var(--muted)">합금 원료 ${ALLOY.size}종은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
+        + (kind==="-alloy"?` · <span style="color:var(--muted)">주조 투입·잉곳 ${ALLOY.size}종은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
       : `⚠ ERP 데이터가 아직 없습니다. <b>⚙ ERP 데이터</b> 에서 먼저 불러와 주세요.`;
 
     $("#ordTable thead").innerHTML =
