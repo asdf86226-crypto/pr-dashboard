@@ -96,6 +96,46 @@
   .stamp .sync-at{color:var(--faint); font-weight:600; margin-left:8px}
 
   /* ---------- 현황판(콘솔) ---------- */
+  /* ---------- 페이지 탭 (구매요청 / 발주 필요) ---------- */
+  .ptabs{display:flex; gap:6px; margin:14px 24px 0; flex-wrap:wrap}
+  .ptab{border:1px solid var(--border); background:var(--surface); color:var(--muted);
+        font-weight:700; font-size:13px; padding:0 14px; height:34px; border-radius:9px;
+        display:inline-flex; align-items:center; gap:7px; line-height:1}
+  .ptab:hover{border-color:var(--border-strong); color:var(--ink)}
+  .ptab.on{background:var(--ink); color:var(--surface); border-color:var(--ink)}
+  .ptab-badge{background:var(--risk-1); color:#fff; font-size:11px; font-weight:800;
+              padding:1px 6px; border-radius:999px; font-variant-numeric:tabular-nums}
+  @media (max-width:700px){ .ptabs{margin:12px 14px 0} }
+
+  /* ---------- 발주 필요 ---------- */
+  .ord{margin:16px 24px 40px}
+  @media (max-width:700px){ .ord{margin:14px 14px 32px} }
+  .ord-ctl{display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px}
+  .ord-ctl .f{display:flex; flex-direction:column; gap:5px}
+  .ord-ctl label{font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.02em}
+  .ord-ctl input,.ord-ctl select{height:32px; padding:0 9px; font-size:13px}
+  .ord-ctl .grow{flex:1}
+  .ord-note{font-size:12px; color:var(--muted); margin:0 0 10px; line-height:1.6}
+  .ord-kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px}
+  @media (max-width:760px){ .ord-kpis{grid-template-columns:repeat(2,1fr)} }
+  .ord-kpi{border:1px solid var(--border); border-radius:10px; padding:11px 13px; background:var(--surface)}
+  .ord-kpi .lb{font-size:11px; font-weight:700; color:var(--muted)}
+  .ord-kpi .vl{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:3px}
+  .ord-kpi .vl .u{font-size:12px; font-weight:700; color:var(--muted); margin-left:3px}
+  .ord-tb{width:100%; border-collapse:collapse; font-size:13px; min-width:900px}
+  .ord-tb th{position:sticky; top:0; background:var(--surface-2); text-align:left; font-size:10.5px;
+             font-weight:700; letter-spacing:.05em; color:var(--muted); padding:9px 10px;
+             border-bottom:1px solid var(--border); white-space:nowrap; z-index:1}
+  .ord-tb td{padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top}
+  .ord-tb .num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .ord-tb tr.red td{background:color-mix(in srgb,var(--risk-1) 7%,transparent)}
+  .ord-tb .short{font-weight:800; color:var(--risk-1)}
+  .ord-wrap{overflow:auto; max-height:62vh; border:1px solid var(--border); border-radius:10px}
+  .ord-empty{padding:34px 16px; text-align:center; color:var(--muted); font-size:13.5px}
+  .ord-lv{font-weight:800; white-space:nowrap}
+  .ord-pick{display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;
+            margin-top:12px; padding:12px 14px; border:1px solid var(--border);
+            border-radius:10px; background:var(--surface-2)}
   .toprow{margin:16px 24px -6px; display:flex; justify-content:flex-end; align-items:flex-start; gap:8px; flex-wrap:wrap}
   /* 이모지 글자 높이가 달라 줄 높이가 밀리므로 높이를 고정해 둘을 같게 만든다 */
   .toprow .linkbtn{height:32px; padding:0 12px; cursor:pointer}
@@ -522,6 +562,12 @@
   <button id="bannerSetup">구글 시트 연결</button>
 </div>
 
+<div class="ptabs">
+  <button class="ptab on" data-page="req">📋 구매요청</button>
+  <button class="ptab" data-page="order">🧾 발주 필요 <span class="ptab-badge" id="ordBadge" hidden>0</span></button>
+</div>
+
+<div id="pageReq">
 <div class="toprow">
   <button class="linkbtn" id="backupBtn" title="구매요청 전체를 되살릴 수 있는 형태로 파일에 저장합니다">💾 저장하기 (JSON 백업)</button>
   <label class="linkbtn" id="restoreBtn" for="restoreInput" title="백업 파일에서 되살립니다. 이미 있는 요청은 건너뜁니다">📥 불러오기 (JSON 복원)</label>
@@ -1420,6 +1466,56 @@ function erpBlob_(){
     </div>
   </section>
 </main>
+</div><!-- /pageReq -->
+
+<section class="ord" id="pageOrder" hidden>
+  <div class="card" style="padding:16px 18px">
+    <h2 style="font-size:16px; font-weight:800; margin:0 0 4px">발주가 필요한 품목</h2>
+    <p class="ord-note" id="ordNote"></p>
+
+    <div class="ord-ctl">
+      <div class="f"><label>보기</label>
+        <select id="ordRisk">
+          <option value="risk">위험 + 주의</option>
+          <option value="red">위험만</option>
+          <option value="all">전체</option>
+          <option value="chk">재고 확인필요(음수)</option>
+        </select></div>
+      <div class="f"><label>품목구분</label>
+        <select id="ordKind">
+          <option value="-alloy">합금 원료 제외</option>
+          <option value="">전체</option>
+        </select></div>
+      <div class="f"><label>위험 기준(개월)</label><input id="ordRed" type="number" min="0.5" step="0.5" value="2" style="width:92px"></div>
+      <div class="f"><label>주의 기준(개월)</label><input id="ordAmber" type="number" min="1" step="0.5" value="4" style="width:92px"></div>
+      <div class="f"><label>필요 개월</label><input id="ordNeed" type="number" min="1" step="1" value="3" style="width:84px"></div>
+      <div class="f grow"><label>검색</label><input id="ordSearch" placeholder="품목코드·품명"></div>
+      <button class="linkbtn" id="ordCsv">⬇ CSV 내보내기</button>
+    </div>
+
+    <div class="ord-kpis" id="ordKpis"></div>
+
+    <div class="ord-wrap">
+      <table class="ord-tb" id="ordTable"><thead></thead><tbody></tbody></table>
+    </div>
+
+    <div class="ord-pick">
+      <div class="f" style="display:flex;flex-direction:column;gap:5px">
+        <label style="font-size:11px;font-weight:700;color:var(--muted)">요청팀</label>
+        <select id="ordTeam" style="height:32px;padding:0 9px">
+          <option>개발</option><option>자재</option><option>생산</option><option>품질</option>
+        </select></div>
+      <div class="f" style="display:flex;flex-direction:column;gap:5px">
+        <label style="font-size:11px;font-weight:700;color:var(--muted)">요청자</label>
+        <input id="ordWho" placeholder="이름" style="height:32px;padding:0 9px;width:120px"></div>
+      <div class="f" style="display:flex;flex-direction:column;gap:5px">
+        <label style="font-size:11px;font-weight:700;color:var(--muted)">입고요청일</label>
+        <input id="ordDue" type="date" style="height:32px;padding:0 9px"></div>
+      <span style="flex:1"></span>
+      <button class="btn" id="ordAdd" style="width:auto;max-width:none;margin:0">＋ 선택한 품목 구매요청에 담기</button>
+    </div>
+  </div>
+</section>
 
 <div id="toast"></div>
 
@@ -2736,6 +2832,179 @@ function erpBlob_(){
     }catch(e){
       toast("저장 실패: "+e.message+" — 키보드 Ctrl+S 로도 저장할 수 있습니다");
     }finally{ b.disabled=false; b.textContent=old; }
+  };
+
+  /* ---------- 발주 필요 ----------
+   * 소진 예상(개월) = 재고 ÷ 월평균 소요량
+   * 월평균 소요량은 '실제 판매 + BOM 전개'라, 판매만 보는 것보다 자재·반제품에 정확하다.
+   * 음수 재고는 마감 전 조정 수치이므로 급한 발주로 올리지 않고 따로 센다. */
+  let ordPage=false;
+  /* 주조(용해)에 들어가는 합금 원료. BOM 소요량이 배합비가 아니라 1 로 들어와 있어
+     수량을 믿을 수 없다 — 비쓰무트는 재고 33인데 월평균이 28,417 로 잡힌다.
+     기본값에서 빼두고, 필요하면 '전체'로 바꿔 볼 수 있게 한다. */
+  const ALLOY=new Set(["Zn","Al","ALB","Pb","Bi","Ni","Sn","CuP","Sb",
+                       "Cu.1","Brass.1","Brass.5","Chip-A"]);
+  const ordNum=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
+
+  function ordRows(){
+    if(!erp || !erp.items) return [];
+    const need=Math.max(1, ordNum(($("#ordNeed")||{}).value)||3);
+    const red=ordNum(($("#ordRed")||{}).value)||2, amber=ordNum(($("#ordAmber")||{}).value)||4;
+    const out=[];
+    for(const c in erp.items){
+      const v=erp.items[c], d=+v.d||0;
+      if(!(d>0) || v.s==null) continue;            // 소요량이나 재고를 모르면 판단 불가
+      const raw=+v.s||0, st=Math.max(0,raw);
+      const cover=st/d;
+      const lvl = raw<0 ? 0 : (cover<red ? 1 : (cover<amber ? 2 : 3));
+      out.push({ code:c, name:v.n||"", kind:v.k||"", raw:raw, stock:st, per:d, cover:cover,
+                 need:Math.round(d*need), short:Math.max(0,Math.round(d*need-st)), lvl:lvl });
+    }
+    // 위험 → 주의 → 여유 → 확인필요(음수). 같은 등급이면 소진이 빠른 순.
+    const rank=l=>l===0?9:l;
+    out.sort((a,b)=> rank(a.lvl)-rank(b.lvl) || a.cover-b.cover || b.short-a.short);
+    return out;
+  }
+
+  function ordFiltered(rows){
+    const mode=($("#ordRisk")||{}).value||"risk";
+    const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
+    const kind=(($("#ordKind")||{}).value);
+    let list=rows.filter(r=>{
+      if(kind==="-alloy"){ if(ALLOY.has(r.code)) return false; }
+      else if(kind && r.kind!==kind) return false;
+      if(mode==="chk") return r.lvl===0;
+      if(mode==="red") return r.lvl===1;
+      if(mode==="risk") return r.lvl===1||r.lvl===2;
+      return true;
+    });
+    if(q) list=list.filter(r=>(r.code+" "+r.name).toLowerCase().includes(q));
+    return list;
+  }
+
+  const ORDLV=["확인필요","위험","주의","여유"];
+  const ORDCOLOR=["var(--muted)","var(--risk-1)","var(--risk-2)","var(--risk-3)"];
+
+  function renderOrder(){
+    const all=ordRows();
+    // 배지와 KPI 는 화면에 보이는 기준(품목구분 필터)과 같아야 혼란이 없다
+    const kind=(($("#ordKind")||{}).value);
+    const rows = kind==="-alloy" ? all.filter(r=>!ALLOY.has(r.code))
+               : (kind ? all.filter(r=>r.kind===kind) : all);
+    const nRed=rows.filter(r=>r.lvl===1).length;
+    const nAmb=rows.filter(r=>r.lvl===2).length;
+    const nChk=rows.filter(r=>r.lvl===0).length;
+
+    const b=$("#ordBadge");
+    if(b){ b.textContent=(nRed+nAmb).toLocaleString(); b.hidden=!(nRed+nAmb); }
+    if(!ordPage) return;                            // 배지만 갱신하고 끝
+
+    const sel=$("#ordKind");
+    if(sel && sel.options.length<=2){
+      const kinds=[...new Set(all.map(r=>r.kind).filter(Boolean))].sort();
+      kinds.forEach(k=>{ const o=document.createElement("option"); o.value=k; o.textContent=k; sel.appendChild(o); });
+    }
+    const list=ordFiltered(rows);
+    const totalShort=list.reduce((s,r)=>s+r.short,0);
+    const needM=Math.max(1, ordNum($("#ordNeed").value)||3);
+
+    $("#ordKpis").innerHTML=
+      `<div class="ord-kpi"><div class="lb">위험 (${esc($("#ordRed").value)}개월 미만)</div>
+         <div class="vl" style="color:var(--risk-1)">${nRed.toLocaleString()}<span class="u">품목</span></div></div>
+       <div class="ord-kpi"><div class="lb">주의 (${esc($("#ordAmber").value)}개월 미만)</div>
+         <div class="vl" style="color:var(--risk-2)">${nAmb.toLocaleString()}<span class="u">품목</span></div></div>
+       <div class="ord-kpi"><div class="lb">${needM}개월치 부족 수량</div>
+         <div class="vl">${totalShort.toLocaleString()}<span class="u">개</span></div></div>
+       <div class="ord-kpi"><div class="lb">재고 확인필요</div>
+         <div class="vl" style="color:var(--muted)">${nChk.toLocaleString()}<span class="u">품목</span></div></div>`;
+
+    $("#ordNote").innerHTML = erp
+      ? `판단 가능한 <b>${rows.length.toLocaleString()}품목</b> 기준 · 소진 예상 = 재고 ÷ 월평균 소요량`
+        + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
+        + (nChk?` · <span style="color:var(--muted)">재고가 음수인 ${nChk}품목은 마감 전 조정 수치로 보고 맨 뒤로 뺐습니다</span>`:"")
+        + (kind==="-alloy"?` · <span style="color:var(--muted)">합금 원료 ${ALLOY.size}종은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
+      : `⚠ ERP 데이터가 아직 없습니다. <b>⚙ ERP 데이터</b> 에서 먼저 불러와 주세요.`;
+
+    $("#ordTable thead").innerHTML =
+      `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
+       <th>품목코드</th><th>품명</th><th>품목구분</th>
+       <th class="num">재고</th><th class="num">월평균 소요</th><th class="num">소진 예상</th>
+       <th class="num">${needM}개월 필요</th><th class="num">부족 수량</th></tr>`;
+
+    if(!list.length){
+      $("#ordTable tbody").innerHTML=
+        `<tr><td colspan="9"><div class="ord-empty">${erp?"해당하는 품목이 없습니다 👍":"ERP 데이터를 먼저 불러와 주세요"}</div></td></tr>`;
+      return;
+    }
+    $("#ordTable tbody").innerHTML=list.slice(0,500).map(r=>`
+      <tr class="${r.lvl===1?"red":""}">
+        <td><input type="checkbox" class="ordChk" data-code="${esc(r.code)}"${r.short?"":" disabled"}></td>
+        <td class="mono">${esc(r.code)}</td>
+        <td>${esc(r.name)}</td>
+        <td style="white-space:nowrap;color:var(--muted)">${esc(r.kind)}</td>
+        <td class="num">${r.stock.toLocaleString()}${r.raw<0?`<br><span style="font-size:11px;color:var(--muted)">원래 ${r.raw.toLocaleString()}</span>`:""}</td>
+        <td class="num">${r.per.toLocaleString()}</td>
+        <td class="num"><span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${
+          r.lvl===0?ORDLV[0]:r.cover.toFixed(1)+"개월"}</span></td>
+        <td class="num">${r.need.toLocaleString()}</td>
+        <td class="num ${r.short?"short":""}">${r.short?r.short.toLocaleString():"-"}</td>
+      </tr>`).join("")
+      + (list.length>500?`<tr><td colspan="9"><div class="ord-empty">${list.length.toLocaleString()}품목 중 급한 500개만 보여줍니다 — 검색이나 보기 조건을 좁혀주세요</div></td></tr>`:"");
+
+    const chkAll=$("#ordAll");
+    if(chkAll) chkAll.onclick=()=>document.querySelectorAll(".ordChk:not([disabled])").forEach(x=>x.checked=chkAll.checked);
+  }
+
+  function showPage(which){
+    ordPage = (which==="order");
+    $("#pageReq").hidden = ordPage;
+    $("#pageOrder").hidden = !ordPage;
+    document.querySelectorAll(".ptab").forEach(t=>t.classList.toggle("on", t.dataset.page===which));
+    if(ordPage){
+      const w=$("#ordWho"); if(w && !w.value) w.value=loadRequester();
+      const d=$("#ordDue"); if(d && !d.value) d.value=todayISO();
+      renderOrder();
+    }
+  }
+  document.querySelectorAll(".ptab").forEach(t=>t.onclick=()=>showPage(t.dataset.page));
+  ["ordRisk","ordKind","ordRed","ordAmber","ordNeed","ordSearch"].forEach(id=>{
+    const el=$("#"+id); if(el) el.addEventListener("input", renderOrder);
+  });
+
+  $("#ordCsv").onclick=()=>{
+    const list=ordFiltered(ordRows());
+    if(!list.length){ toast("내보낼 품목이 없습니다"); return; }
+    const needM=Math.max(1, ordNum($("#ordNeed").value)||3);
+    const head=["품목코드","품명","품목구분","재고","월평균 소요","소진 예상(개월)",needM+"개월 필요","부족 수량","등급"];
+    const rows=list.map(r=>[r.code,r.name,r.kind,r.stock,r.per,
+      r.lvl===0?"":r.cover.toFixed(1),r.need,r.short,ORDLV[r.lvl]]);
+    const csv="\uFEFF"+[head].concat(rows)
+      .map(r=>r.map(c=>`"${String(c==null?"":c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+    const a=document.createElement("a");
+    a.href=url; a.download=`발주필요_${todayISO()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast(`${list.length}품목을 내보냈습니다`);
+  };
+
+  $("#ordAdd").onclick=async ()=>{
+    const picked=[...document.querySelectorAll(".ordChk:checked")].map(x=>x.dataset.code);
+    if(!picked.length){ toast("담을 품목을 선택하세요"); return; }
+    const who=($("#ordWho").value||"").trim();
+    if(!who){ toast("요청자를 입력하세요"); $("#ordWho").focus(); return; }
+    const due=$("#ordDue").value || todayISO();
+    const team=$("#ordTeam").value;
+    const by={}; ordRows().forEach(r=>by[r.code]=r);
+    const items=picked.map(c=>by[c]).filter(r=>r&&r.short>0).map(r=>({
+      code:r.code, itemName:r.name, qty:String(r.short), dueDate:due, note:"발주 필요 목록에서 추가", requester:who }));
+    if(!items.length){ toast("부족 수량이 있는 품목이 없습니다"); return; }
+    if(!confirm(`${items.length}품목을 ${team} 팀 구매요청으로 담습니다.\n수량은 ${Math.max(1,ordNum($("#ordNeed").value)||3)}개월치 부족 수량으로 넣습니다.\n\n계속할까요?`)) return;
+    saveRequester(who);
+    const n=await addItems(items, team, who);
+    if(n){ toast(`${n}건을 구매요청에 담았습니다`);
+           document.querySelectorAll(".ordChk").forEach(x=>x.checked=false);
+           const a=$("#ordAll"); if(a) a.checked=false;
+           renderOrder(); }
   };
 
   /* ---------- 백업 저장 / 복원 ---------- */
