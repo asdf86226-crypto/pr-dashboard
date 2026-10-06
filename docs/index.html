@@ -96,7 +96,7 @@
   .stamp .sync-at{color:var(--faint); font-weight:600; margin-left:8px}
 
   /* ---------- 현황판(콘솔) ---------- */
-  .toprow{margin:16px 24px -6px; display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap}
+  .toprow{margin:16px 24px -6px; display:flex; justify-content:flex-end; align-items:stretch; gap:8px; flex-wrap:wrap}
   .toprow label{cursor:pointer}
   @media (max-width:700px){ .toprow{margin:14px 14px -6px} }
   .console{
@@ -271,7 +271,8 @@
 
   .foot{display:flex; align-items:center; gap:10px; padding:12px 16px; border-top:1px solid var(--border); flex-wrap:wrap}
   .foot .info{font-size:12px; color:var(--muted); margin-right:auto}
-  .linkbtn{border:1px solid var(--border); background:var(--surface); color:var(--ink); font-weight:600; font-size:12.5px; padding:7px 12px; border-radius:8px; display:inline-flex; gap:6px; align-items:center}
+  /* label 과 button 을 같은 높이로 — label 은 줄 높이를 본문에서 물려받아 더 커진다 */
+  .linkbtn{border:1px solid var(--border); background:var(--surface); color:var(--ink); font-weight:600; font-size:12.5px; padding:7px 12px; border-radius:8px; display:inline-flex; gap:6px; align-items:center; justify-content:center; line-height:1.25; box-sizing:border-box; font-family:inherit}
   .linkbtn:hover{border-color:var(--border-strong)}
   .linkbtn.danger:hover{color:var(--s-late); border-color:var(--s-late)}
 
