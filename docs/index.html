@@ -2845,9 +2845,12 @@ function erpBlob_(){
      빼거나 더할 코드가 생기면 이 목록만 고치면 된다. */
   const ALLOY=new Set([
     "Zn","Al","ALB","Pb","Bi","Ni","Sn","CuP","Sb",      // 합금 원료
-    "Cu.1","Brass.1","Brass.5","Chip-A",                 // 동·황동 스크랩, 주물분
-    "INGOT.A","INGOT.B","INGOT.C","C89540"               // 잉곳 (용해 결과물)
+    "Cu.1","Brass.1","Brass.5","C89540"                  // 동·황동 스크랩, 무연황동잉곳
   ]);
+  // 잉곳·주물분은 등급별로 코드가 계속 생긴다(INGOT.A/B/C/C-1/R/LF/DR…).
+  // 하나씩 적는 대신 앞글자로 잡아 새 코드도 저절로 빠지게 한다.
+  const ALLOYRE=/^(INGOT|Chip-)/i;
+  const isAlloy=code=>ALLOY.has(code)||ALLOYRE.test(code);
   const ordNum=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
 
   function ordRows(){
@@ -2875,7 +2878,7 @@ function erpBlob_(){
     const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
     const kind=(($("#ordKind")||{}).value);
     let list=rows.filter(r=>{
-      if(kind==="-alloy"){ if(ALLOY.has(r.code)) return false; }
+      if(kind==="-alloy"){ if(isAlloy(r.code)) return false; }
       else if(kind && r.kind!==kind) return false;
       if(mode==="chk") return r.lvl===0;
       if(mode==="red") return r.lvl===1;
@@ -2893,7 +2896,7 @@ function erpBlob_(){
     const all=ordRows();
     // 배지와 KPI 는 화면에 보이는 기준(품목구분 필터)과 같아야 혼란이 없다
     const kind=(($("#ordKind")||{}).value);
-    const rows = kind==="-alloy" ? all.filter(r=>!ALLOY.has(r.code))
+    const rows = kind==="-alloy" ? all.filter(r=>!isAlloy(r.code))
                : (kind ? all.filter(r=>r.kind===kind) : all);
     const nRed=rows.filter(r=>r.lvl===1).length;
     const nAmb=rows.filter(r=>r.lvl===2).length;
@@ -2926,7 +2929,7 @@ function erpBlob_(){
       ? `판단 가능한 <b>${rows.length.toLocaleString()}품목</b> 기준 · 소진 예상 = 재고 ÷ 월평균 소요량`
         + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
         + (nChk?` · <span style="color:var(--muted)">재고가 음수인 ${nChk}품목은 마감 전 조정 수치로 보고 맨 뒤로 뺐습니다</span>`:"")
-        + (kind==="-alloy"?` · <span style="color:var(--muted)">주조 투입·잉곳 ${ALLOY.size}종은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
+        + (kind==="-alloy"?` · <span style="color:var(--muted)">주조 투입·잉곳 ${all.filter(r=>isAlloy(r.code)).length}품목은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
       : `⚠ ERP 데이터가 아직 없습니다. <b>⚙ ERP 데이터</b> 에서 먼저 불러와 주세요.`;
 
     $("#ordTable thead").innerHTML =
