@@ -643,6 +643,19 @@ function doPost(e){ const b=JSON.parse(e.postData.contents||'{}');
       rng.setValues([row]); });
     try{ notify_(b.items||[]); }catch(err){} }
   else if(b.action==='remove'){ for(let i=1;i&lt;v.length;i++){ if(v[i][idc]===b.id){ s.deleteRow(i+1); break; } } }
+  // 한 건 고치기. id 와 접수일(createdAt)은 바꾸지 않는다.
+  else if(b.action==='update'){ fixFormat_(s);
+    const pt=b.patch||{};
+    for(let i=1;i&lt;v.length;i++){
+      if(String(v[i][idc])!==String(b.id)) continue;
+      const row=COLS.map(function(k,ci){
+        if(k==='id'||k==='createdAt') return v[i][ci]!=null?String(v[i][ci]):'';
+        return pt[k]!=null ? String(pt[k]) : (v[i][ci]!=null?String(v[i][ci]):''); });
+      const rng=s.getRange(i+1,1,1,COLS.length);
+      rng.setNumberFormats([COLS.map(function(){ return '@'; })]);
+      rng.setValues([row]);
+      return json_({ok:true, updated:1}); }
+    return json_({ok:true, updated:0}); }
   else if(b.action==='clear'){ if(s.getLastRow()&gt;1) s.deleteRows(2,s.getLastRow()-1); }
   // 백업 파일에서 되살리기. id 가 이미 있으면 건너뛰므로 여러 번 보내도 중복되지 않는다.
   else if(b.action==='restore'){ fixFormat_(s);
@@ -1516,6 +1529,33 @@ function erpBlob_(){
     </div>
   </div>
 </section>
+
+<!-- 구매요청 수정 -->
+<div class="modal-bg" id="editBg">
+  <div class="modal" style="max-width:460px">
+    <div class="mh"><div><h2>구매요청 수정</h2>
+      <p>접수일과 요청자는 그대로 두고 내용만 고칩니다.</p></div>
+      <button class="x" id="editClose" title="닫기">×</button></div>
+    <div class="mb">
+      <form id="editForm">
+        <div class="field"><label>요청팀 <span class="req">*</span></label>
+          <select id="edTeam"><option>개발</option><option>자재</option><option>생산</option><option>품질</option></select></div>
+        <div class="row2">
+          <div class="field"><label>품목코드 <span class="req">*</span></label><input id="edCode" required autocomplete="off"></div>
+          <div class="field"><label>수량 <span class="req">*</span></label><input id="edQty" required autocomplete="off"></div>
+        </div>
+        <div class="field"><label>품명 <span class="req">*</span></label><input id="edName" required autocomplete="off"></div>
+        <div class="row2">
+          <div class="field"><label>입고요청일 <span class="req">*</span></label><input id="edDue" type="date" required></div>
+          <div class="field"><label>요청자</label><input id="edWho" autocomplete="off"></div>
+        </div>
+        <div class="field"><label>기타사항</label><textarea id="edNote" placeholder="규격, 납품처, 참고사항 등"></textarea></div>
+        <p class="hint" id="edHint"></p>
+        <button class="btn" type="submit">저장</button>
+      </form>
+    </div>
+  </div>
+</div>
 
 <div id="toast"></div>
 
@@ -2598,11 +2638,13 @@ function erpBlob_(){
         <td class="duedate"><span style="white-space:nowrap">${fmtDate(d.dueDate)}</span></td>
         <td><span class="memo" title="${esc(d.note)}">${esc(d.note)||"–"}</span></td>
         <td><div class="rowbtns">
-          ${d._pending?"":`<button class="del" data-act="del" data-id="${d.id}" title="삭제">✕</button>`}
+          ${d._pending?"":`<button class="del" data-act="edit" data-id="${d.id}" title="수정">✎</button>
+          <button class="del" data-act="del" data-id="${d.id}" title="삭제">✕</button>`}
         </div></td>
       </tr>`;
     }).join("");
 
+    tb.querySelectorAll("button[data-act='edit']").forEach(b=>b.onclick=()=>openEdit(b.dataset.id));
     tb.querySelectorAll("button[data-act='del']").forEach(b=>b.onclick=async ()=>{
       const d=data.find(x=>x.id===b.dataset.id); if(!d) return;
       if(!confirm(`'${d.itemName||d.code}' 요청을 삭제할까요?`)) return;
@@ -2838,6 +2880,60 @@ function erpBlob_(){
    * 소진 예상(개월) = 재고 ÷ 월평균 소요량
    * 월평균 소요량은 '실제 판매 + BOM 전개'라, 판매만 보는 것보다 자재·반제품에 정확하다.
    * 음수 재고는 마감 전 조정 수치이므로 급한 발주로 올리지 않고 따로 센다. */
+  /* ---------- 구매요청 수정 ---------- */
+  let editId=null;
+  function openEdit(id){
+    const d=data.find(x=>x.id===id);
+    if(!d){ toast("요청을 찾지 못했습니다"); return; }
+    if(d._pending){ toast("아직 저장 중입니다 — 잠시 뒤 다시 시도하세요"); return; }
+    if(store.mode==="sheet" && failStreak>0){
+      toast("시트 연결이 불안정합니다 — 새로고침 후 다시 시도하세요"); return; }
+    editId=id;
+    $("#edTeam").value = d.team||"개발";
+    $("#edCode").value = d.code||"";
+    $("#edQty").value  = d.qty||"";
+    $("#edName").value = d.itemName||"";
+    $("#edDue").value  = normDate_(d.dueDate)||todayISO();
+    $("#edWho").value  = d.requester||"";
+    $("#edNote").value = d.note||"";
+    $("#edHint").textContent = `접수일 ${fmtDate(d.createdAt)} · 고치면 팀 전체 화면에 반영됩니다`;
+    $("#editBg").classList.add("show");
+    setTimeout(()=>$("#edQty").focus(),50);
+  }
+  function closeEdit(){ $("#editBg").classList.remove("show"); editId=null; }
+  $("#editClose").onclick=closeEdit;
+  $("#editBg").onclick=e=>{ if(e.target===$("#editBg")) closeEdit(); };
+
+  $("#editForm").addEventListener("submit", async e=>{
+    e.preventDefault();
+    if(!editId) return;
+    const d=data.find(x=>x.id===editId);
+    if(!d){ toast("요청을 찾지 못했습니다"); closeEdit(); return; }
+    const patch={
+      team: $("#edTeam").value,
+      code: $("#edCode").value.trim(),
+      itemName: $("#edName").value.trim(),
+      qty: String($("#edQty").value).trim(),
+      dueDate: $("#edDue").value,
+      requester: $("#edWho").value.trim(),
+      note: $("#edNote").value.trim()
+    };
+    if(!patch.code && !patch.itemName){ toast("품목코드나 품명 중 하나는 있어야 합니다"); return; }
+    const changed=Object.keys(patch).filter(k=>String(d[k]||"")!==String(patch[k]||""));
+    if(!changed.length){ toast("바뀐 내용이 없습니다"); closeEdit(); return; }
+    const id=editId;
+    closeEdit();
+    Object.assign(d, patch);                 // 화면에 먼저 반영하고
+    renderAll();
+    try{ await store.update(id, patch); }    // 뒤이어 서버와 맞춘다
+    catch(err){ toast("수정 실패: "+err.message); await refresh(); return; }
+    if(store.mode==="sheet"){
+      toast("수정했습니다 — 잠시 뒤 반영을 확인합니다");
+      clearTimeout(reconcileTimer);
+      reconcileTimer=setTimeout(()=>refresh({quiet:true}), 4000);
+    }else{ toast("수정했습니다"); }
+  });
+
   let ordPage=false;
   /* 주조(용해) 공정에 들어가고 나오는 품목들. BOM 소요량이 배합비가 아니라 1 로
      들어와 있어 수량을 믿을 수 없다 — 비쓰무트는 재고 33인데 월평균이 28,417 로 잡힌다.
