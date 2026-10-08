@@ -130,9 +130,18 @@
   .ord-tb .num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
   .ord-tb tr.red td{background:color-mix(in srgb,var(--risk-1) 7%,transparent)}
   .ord-tb .short{font-weight:800; color:var(--risk-1)}
-  .ord-tb input.ordQty{width:92px; height:28px; padding:0 7px; text-align:right;
-    font-variant-numeric:tabular-nums; font-size:13px; font-weight:700}
-  .ord-tb input.ordQty.short{color:var(--risk-1)}
+  /* 담기 팝업 */
+  .pick-list{max-height:46vh; overflow:auto; border:1px solid var(--border); border-radius:10px; margin:10px 0 4px}
+  .pick-row{display:grid; grid-template-columns:1fr 104px; gap:10px; align-items:center;
+            padding:9px 12px; border-bottom:1px solid var(--border)}
+  .pick-row:last-child{border-bottom:0}
+  .pick-row .nm{font-size:13px; font-weight:700; line-height:1.4}
+  .pick-row .sub{font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .pick-row input{height:30px; padding:0 8px; text-align:right; font-weight:700;
+                  font-variant-numeric:tabular-nums; width:100%}
+  .pick-sum{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted);
+            font-weight:700; margin:8px 2px 2px}
+  .pick-sum b{color:var(--ink); font-variant-numeric:tabular-nums}
   .ord-wrap{overflow:auto; max-height:62vh; border:1px solid var(--border); border-radius:10px}
   .ord-empty{padding:34px 16px; text-align:center; color:var(--muted); font-size:13.5px}
   .ord-lv{font-weight:800; white-space:nowrap}
@@ -1516,22 +1525,34 @@ function erpBlob_(){
     </div>
 
     <div class="ord-pick">
-      <div class="f" style="display:flex;flex-direction:column;gap:5px">
-        <label style="font-size:11px;font-weight:700;color:var(--muted)">요청팀</label>
-        <select id="ordTeam" style="height:32px;padding:0 9px">
-          <option>개발</option><option>자재</option><option>생산</option><option>품질</option>
-        </select></div>
-      <div class="f" style="display:flex;flex-direction:column;gap:5px">
-        <label style="font-size:11px;font-weight:700;color:var(--muted)">요청자</label>
-        <input id="ordWho" placeholder="이름" style="height:32px;padding:0 9px;width:120px"></div>
-      <div class="f" style="display:flex;flex-direction:column;gap:5px">
-        <label style="font-size:11px;font-weight:700;color:var(--muted)">입고요청일</label>
-        <input id="ordDue" type="date" style="height:32px;padding:0 9px"></div>
+      <span id="ordPicked" style="font-size:12.5px;font-weight:700;color:var(--muted)">선택된 품목이 없습니다</span>
       <span style="flex:1"></span>
       <button class="btn" id="ordAdd" style="width:auto;max-width:none;margin:0">＋ 선택한 품목 구매요청에 담기</button>
     </div>
   </div>
 </section>
+
+<!-- 발주 필요 → 구매요청에 담기 -->
+<div class="modal-bg" id="pickBg">
+  <div class="modal" style="max-width:560px">
+    <div class="mh"><div><h2>구매요청에 담기</h2>
+      <p>수량을 확인하고 고친 뒤 담아주세요. 비우거나 0으로 두면 그 품목은 빠집니다.</p></div>
+      <button class="x" id="pickClose" title="닫기">×</button></div>
+    <div class="mb">
+      <div class="ord-ctl" style="margin-bottom:4px">
+        <div class="f"><label>요청팀 <span class="req">*</span></label>
+          <select id="ordTeam"><option>개발</option><option>자재</option><option>생산</option><option>품질</option></select></div>
+        <div class="f"><label>요청자 <span class="req">*</span></label>
+          <input id="ordWho" placeholder="이름" style="width:110px"></div>
+        <div class="f"><label>입고요청일 <span class="req">*</span></label>
+          <input id="ordDue" type="date"></div>
+      </div>
+      <div class="pick-list" id="pickList"></div>
+      <div class="pick-sum" id="pickSum"></div>
+      <button class="btn" id="pickGo" style="margin-top:10px">＋ 구매요청에 담기</button>
+    </div>
+  </div>
+</div>
 
 <!-- 구매요청 수정 -->
 <div class="modal-bg" id="editBg">
@@ -2938,8 +2959,6 @@ function erpBlob_(){
   });
 
   let ordPage=false;
-  // 담기 전에 손으로 고친 수량. 표를 다시 그려도 유지된다.
-  let ordQty={};
   /* 주조(용해) 공정에 들어가고 나오는 품목들. BOM 소요량이 배합비가 아니라 1 로
      들어와 있어 수량을 믿을 수 없다 — 비쓰무트는 재고 33인데 월평균이 28,417 로 잡힌다.
      기본값에서 빼두고, 필요하면 '전체'로 바꿔 볼 수 있다.
@@ -3055,22 +3074,15 @@ function erpBlob_(){
         <td class="num"><span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${
           r.lvl===0?ORDLV[0]:r.cover.toFixed(1)+"개월"}</span></td>
         <td class="num">${r.need.toLocaleString()}</td>
-        <td class="num"><input class="ordQty ${r.short?"short":""}" type="number" min="0" step="1"
-            data-code="${esc(r.code)}" value="${ordQty[r.code]!=null?ordQty[r.code]:r.short}"></td>
+        <td class="num ${r.short?"short":""}">${r.short?r.short.toLocaleString():"-"}</td>
       </tr>`).join("")
       + (list.length>500?`<tr><td colspan="9"><div class="ord-empty">${list.length.toLocaleString()}품목 중 급한 500개만 보여줍니다 — 검색이나 보기 조건을 좁혀주세요</div></td></tr>`:"");
 
     const chkAll=$("#ordAll");
-    if(chkAll) chkAll.onclick=()=>document.querySelectorAll(".ordChk").forEach(x=>x.checked=chkAll.checked);
-    // 수량을 고치면 기억해 두고, 그 줄을 자동으로 선택해 준다
-    $("#ordTable").querySelectorAll(".ordQty").forEach(inp=>{
-      inp.oninput=()=>{
-        ordQty[inp.dataset.code]=inp.value;
-        const row=inp.closest("tr"), c=row && row.querySelector(".ordChk");
-        if(c && !c.checked && ordNum(inp.value)>0) c.checked=true;
-      };
-      inp.onclick=e=>e.stopPropagation();
-    });
+    if(chkAll) chkAll.onclick=()=>{
+      document.querySelectorAll(".ordChk").forEach(x=>x.checked=chkAll.checked); ordCount(); };
+    $("#ordTable").querySelectorAll(".ordChk").forEach(c=>c.onchange=ordCount);
+    ordCount();
   }
 
   function showPage(which){
@@ -3085,12 +3097,9 @@ function erpBlob_(){
     }
   }
   document.querySelectorAll(".ptab").forEach(t=>t.onclick=()=>showPage(t.dataset.page));
-  ["ordRisk","ordKind","ordRed","ordAmber","ordSearch"].forEach(id=>{
+  ["ordRisk","ordKind","ordRed","ordAmber","ordNeed","ordSearch"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("input", renderOrder);
   });
-  // 필요 개월이 바뀌면 부족 수량이 다시 계산되므로, 손으로 고친 값은 버린다
-  const needEl=$("#ordNeed");
-  if(needEl) needEl.addEventListener("input", ()=>{ ordQty={}; renderOrder(); });
 
   $("#ordCsv").onclick=()=>{
     const list=ordFiltered(ordRows());
@@ -3108,42 +3117,73 @@ function erpBlob_(){
     toast(`${list.length}품목을 내보냈습니다`);
   };
 
-  $("#ordAdd").onclick=async ()=>{
+  function ordCount(){
+    const n=document.querySelectorAll(".ordChk:checked").length;
+    const el=$("#ordPicked");
+    if(el) el.textContent = n ? `${n}품목 선택됨` : "선택된 품목이 없습니다";
+  }
+
+  /* 담기 팝업 — 고른 품목만 모아 수량을 고칠 수 있게 보여준다 */
+  let pickRows=[];
+  function pickSum(){
+    let n=0, sum=0;
+    $("#pickList").querySelectorAll("input").forEach(inp=>{
+      const q=Math.round(ordNum(inp.value));
+      if(q>0){ n++; sum+=q; }
+    });
+    $("#pickSum").innerHTML = n
+      ? `담을 품목 <b>${n}</b>개 · 수량 합계 <b>${sum.toLocaleString()}</b>개`
+      : `<span style="color:var(--risk-1)">수량이 있는 품목이 없습니다</span>`;
+  }
+  function openPick(){
     const picked=[...document.querySelectorAll(".ordChk:checked")].map(x=>x.dataset.code);
     if(!picked.length){ toast("담을 품목을 선택하세요"); return; }
+    const by={}; ordRows().forEach(r=>by[r.code]=r);
+    pickRows=picked.map(c=>by[c]).filter(Boolean);
+    if(!pickRows.length){ toast("선택한 품목을 찾지 못했습니다"); return; }
+    $("#ordWho").value = $("#ordWho").value || loadRequester();
+    $("#ordDue").value = $("#ordDue").value || todayISO();
+    $("#pickList").innerHTML = pickRows.map((r,i)=>`
+      <div class="pick-row">
+        <div>
+          <div class="nm">${esc(r.name||r.code)}</div>
+          <div class="sub">${esc(r.code)} · 재고 ${r.stock.toLocaleString()} · 월평균 ${r.per.toLocaleString()} · ${
+            r.lvl===0?"재고 확인필요":r.cover.toFixed(1)+"개월"}</div>
+        </div>
+        <input type="number" min="0" step="1" data-i="${i}" value="${r.short}">
+      </div>`).join("");
+    $("#pickList").querySelectorAll("input").forEach(inp=>inp.addEventListener("input", pickSum));
+    pickSum();
+    $("#pickBg").classList.add("show");
+  }
+  function closePick(){ $("#pickBg").classList.remove("show"); }
+  $("#ordAdd").onclick=openPick;
+  $("#pickClose").onclick=closePick;
+  $("#pickBg").onclick=e=>{ if(e.target===$("#pickBg")) closePick(); };
+
+  $("#pickGo").onclick=async ()=>{
     const who=($("#ordWho").value||"").trim();
     if(!who){ toast("요청자를 입력하세요"); $("#ordWho").focus(); return; }
     const due=$("#ordDue").value || todayISO();
     const team=$("#ordTeam").value;
-    const by={}; ordRows().forEach(r=>by[r.code]=r);
-    // 품목코드에 점·괄호가 섞여 있어 선택자를 만들기 어렵다. 입력칸을 한 번 훑어 표로 만든다.
-    const onScreen={};
-    $("#ordTable").querySelectorAll(".ordQty").forEach(inp=>{ onScreen[inp.dataset.code]=inp.value; });
-    const qtyOf=c=>{
-      const v = onScreen[c]!=null ? onScreen[c]
-              : (ordQty[c]!=null ? ordQty[c] : (by[c]?by[c].short:0));
-      return Math.round(ordNum(v));
-    };
-    const items=[], skipped=[];
-    picked.forEach(c=>{
-      const r=by[c]; if(!r) return;
-      const q=qtyOf(c);
-      if(q<=0){ skipped.push(c); return; }        // 수량이 0이면 담을 수 없다
+    const items=[]; let skipped=0;
+    $("#pickList").querySelectorAll("input").forEach(inp=>{
+      const r=pickRows[+inp.dataset.i]; if(!r) return;
+      const q=Math.round(ordNum(inp.value));
+      if(q<=0){ skipped++; return; }
       items.push({ code:r.code, itemName:r.name, qty:String(q), dueDate:due,
                    note:"발주 필요 목록에서 추가", requester:who });
     });
-    if(!items.length){ toast("수량이 0인 품목만 선택됐습니다 — 수량을 입력해 주세요"); return; }
-    const total=items.reduce((a,b)=>a+(+b.qty||0),0);
-    if(!confirm(`${items.length}품목(합계 ${total.toLocaleString()}개)을 ${team} 팀 구매요청으로 담습니다.`
-      + (skipped.length?`\n수량이 0인 ${skipped.length}품목은 건너뜁니다.`:"")
-      + `\n\n계속할까요?`)) return;
+    if(!items.length){ toast("수량을 입력해 주세요"); return; }
     saveRequester(who);
+    closePick();
     const n=await addItems(items, team, who);
-    if(n){ toast(`${n}건을 구매요청에 담았습니다`);
-           document.querySelectorAll(".ordChk").forEach(x=>x.checked=false);
-           const a=$("#ordAll"); if(a) a.checked=false;
-           items.forEach(it=>{ delete ordQty[it.code]; });   // 담은 줄은 자동 계산값으로 되돌린다
-           renderOrder(); }
+    if(n){
+      toast(`${n}건을 구매요청에 담았습니다${skipped?` (수량 0인 ${skipped}건 제외)`:""}`);
+      document.querySelectorAll(".ordChk").forEach(x=>x.checked=false);
+      const a=$("#ordAll"); if(a) a.checked=false;
+      ordCount();
+    }
   };
 
   /* ---------- 백업 저장 / 복원 ---------- */
