@@ -2554,7 +2554,7 @@ function erpBlob_(){
     const before=erpAuto ? erpAuto.log : "";
     const changed=await syncErpFromSheet(true);
     renderErpAuto();
-    if(changed){ renderErpPanel(); renderTable(); toast("ERP 데이터가 갱신되었습니다"); return; }
+    if(changed){ renderErpPanel(); renderTable(); renderOrder(); toast("ERP 데이터가 갱신되었습니다"); return; }
     const log=(erpAuto && erpAuto.log)||"";
     if(log!==before && /\[실패\]/.test(log)){ toast("갱신에 실패했습니다 — 아래 기록을 확인하세요"); return; }
     if(tries<8) setTimeout(()=>pollErpAfterRefresh(tries+1), 30000);
@@ -2568,7 +2568,7 @@ function erpBlob_(){
     // 열 때마다 상태를 한 번 확인(자동 갱신이 돌았는지)
     if(isConnected()) syncErpFromSheet(true).then(ch=>{
       renderErpAuto();
-      if(ch){ renderErpPanel(); renderTable(); }
+      if(ch){ renderErpPanel(); renderTable(); renderOrder(); }
     });
   }
   function closeErp(){ $("#erpBg").classList.remove("show"); }
@@ -3322,7 +3322,7 @@ function erpBlob_(){
       erpPick=[]; renderErpList();
       $("#erpClear").style.display="inline-flex";
       $("#erpDownload").style.display="";
-      renderErpPanel(); renderTable();
+      renderErpPanel(); renderTable(); renderOrder();
       toast(`ERP 분석 완료 — 품목 ${(built.n||0).toLocaleString()}개`);
     }catch(e){
       put("\n✕ 실패 — "+e.message);
@@ -3357,7 +3357,7 @@ function erpBlob_(){
     erp=null; erpPick=[]; renderErpList();
     $("#erpClear").style.display="none"; $("#erpDownload").style.display="none";
     $("#erpLog").textContent="";
-    renderErpPanel(); renderTable();
+    renderErpPanel(); renderTable(); renderOrder();
     toast("ERP 데이터를 지웠습니다");
   };
   (function(){
@@ -3489,10 +3489,10 @@ function erpBlob_(){
     renderErpPanel();
     const shared=await fetchSharedErp();          // 같은 폴더의 파일 — 구글 호출 아님
     if(shared && (!erp || String(shared.updatedAt||"") > String(erp.updatedAt||""))) erp=shared;
-    renderErpPanel(); renderTable();
+    renderErpPanel(); renderTable(); renderOrder();
     setTimeout(async ()=>{
       if(failStreak>0 || syncing) return;         // 목록 조회가 불안하면 건드리지 않는다
-      try{ if(await syncErpFromSheet()){ renderErpPanel(); renderTable(); } }catch(e){}
+      try{ if(await syncErpFromSheet()){ renderErpPanel(); renderTable(); renderOrder(); } }catch(e){}
     }, 3000);
   })();
 })();
