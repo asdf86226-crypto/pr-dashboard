@@ -744,7 +744,10 @@ function erpWalk_(folder, out, depth){
   while(fo.hasNext()) erpWalk_(fo.next(), out, depth+1); }
 function erpRun_(){
   const id=P.getProperty('ERP_FOLDER'); if(!id) throw new Error('먼저 ERP설정 을 한 번 실행하세요');
-  const t0=Date.now(), D={stock:{},name:{},kind:{},bom:{},sales:{},months:{}}, log=[];
+  const t0=Date.now(), log=[];
+  //            inter = 그룹사끼리 넘긴 물량 (수요로 더하지 않고 따로 본다)
+  //            bomIx = 같은 BOM 관계가 두 파일에 겹칠 때 한 번만 담기 위한 색인
+  const D={stock:{},name:{},kind:{},bom:{},bomIx:{},sales:{},inter:{},months:{}};
   const self=SpreadsheetApp.getActiveSpreadsheet().getId();
   const list=[]; erpWalk_(DriveApp.getFolderById(id), list, 0);
   // 같은 이름의 파일이 둘 이상이면 판매량이 중복 합산된다. 한 번만 읽는다.
