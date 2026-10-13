@@ -851,7 +851,12 @@ function erpNum_(v){
   return isFinite(n) ? (g?-n:n) : 0; }
 function erpYM_(v){
   if(v instanceof Date) return v.getFullYear()+'-'+('0'+(v.getMonth()+1)).slice(-2);
-  const s=erpNorm_(v), m=s.match(/(\d{4})\D{1,2}(\d{1,2})(?:\D|$)/);
+  const s=erpNorm_(v);
+  // 20250102 처럼 구분자 없이 붙여 내보내는 서식도 있다. 엑셀 일련번호(5자리)와
+  // 헷갈리지 않도록 '8자리'로 못박아 먼저 처리한다.
+  const d8=s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(d8 &amp;&amp; +d8[2]&gt;=1 &amp;&amp; +d8[2]&lt;=12) return d8[1]+'-'+d8[2];
+  const m=s.match(/(\d{4})\D{1,2}(\d{1,2})(?:\D|$)/);
   if(m) return m[1]+'-'+('0'+m[2]).slice(-2);
   const n=parseFloat(s);
   if(n&gt;20000&amp;&amp;n&lt;80000){ const d=new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000);
@@ -942,11 +947,12 @@ function erpSales_(rows,hi,D){
         cV=erpCol_(m,['거래처명','거래처']);
   const cut=erpCutYM_();
   if(!D.inter) D.inter={};
-  let n=0, old=0, grp=0;
+  let n=0, old=0, grp=0, nody=0;
   for(let i=hi+1;i&lt;rows.length;i++){ const r=rows[i]||[]; const c=erpNorm_(r[cC]);
     if(!c||c==='합계'||c==='합 계') continue;
     const q=erpNum_(r[cQ]); if(!q) continue;
     const ym=cD!=null?erpYM_(r[cD]):'';
+    if(!ym) nody++;                                  // 날짜를 못 읽은 줄 — 아래에서 알린다
     if(ym &amp;&amp; ym&lt;cut){ old++; continue; }             // 기간 밖 — 품명도 쓰지 않는다
     const nm=cN!=null?erpNorm_(r[cN]):''; if(nm&amp;&amp;!D.name[c]) D.name[c]=nm;
     if(ym) D.months[ym]=1;
@@ -957,8 +963,10 @@ function erpSales_(rows,hi,D){
     n++; }
   return '판매 '+n+'건'+(old?' (기간 밖 '+old+'건 제외)':'')
          +(grp?' (그룹사 내부이동 '+grp+'건 따로)':'')
-         // 거래처명이 없으면 내부이동을 가려낼 수 없다 — 조용히 넘어가면 안 된다
-         +(cV==null?' ⚠ 거래처명 열이 없어 그룹사 내부이동을 가려내지 못했습니다':''); }
+         // 열이 없거나 날짜를 못 읽으면 조용히 옛 계산으로 돌아간다 — 반드시 알린다
+         +(cV==null?' ⚠ 거래처명 열이 없어 그룹사 내부이동을 가려내지 못했습니다':'')
+         +(cD==null?' ⚠ 일자 열이 없어 기간을 가려내지 못했습니다'
+            : (nody?' ⚠ 일자를 못 읽은 '+nody+'건은 기간과 상관없이 집계했습니다':'')); }
 function erpCompute_(D){
   const months=Math.max(1, Object.keys(D.months).length);
   const ds={}; for(const c in D.sales) ds[c]=D.sales[c]/months;
@@ -1962,6 +1970,10 @@ function erpBlob_(){
   function erpKey(c){ return String(c==null?"":c).trim().toUpperCase().replace(/\s+/g,""); }
   function erpYM(v){
     const s=erpNorm(v).replace(/\//g,"-");
+    // 20250102 처럼 구분자 없이 붙여 내보내는 서식도 있다.
+    // 엑셀 일련번호(5자리)와 헷갈리지 않도록 '8자리'로 못박아 먼저 처리한다.
+    const d8=s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if(d8 && +d8[2]>=1 && +d8[2]<=12) return d8[1]+"-"+d8[2];
     const m=s.match(/^(\d{4})-(\d{1,2})/);
     if(m) return m[1]+"-"+String(m[2]).padStart(2,"0");
     const n=parseFloat(s);
