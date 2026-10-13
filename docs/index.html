@@ -916,7 +916,8 @@ function erpStock_(rows,hi,D){
   return '재고 '+n+'품목'+(cK==null?' (품목구분 열 없음)':''); }
 // 월평균 소요량을 몇 개월치로 볼지. 폴더에 오래된 연도 파일이 함께 있어도
 // 이 기간 밖의 판매는 세지 않는다. 그래야 최근 수요가 묽어지지 않는다.
-const SALESMONTHS = 24;
+// 숫자만 고치면 바뀐다 (12 = 최근 1년, 24 = 최근 2년).
+const SALESMONTHS = 12;
 function erpCutYM_(){
   const d=new Date(); d.setDate(1);                 // 말일 넘침 방지
   d.setMonth(d.getMonth()-(SALESMONTHS-1));
