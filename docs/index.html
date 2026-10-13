@@ -927,21 +927,32 @@ function erpCutYM_(){
   const d=new Date(); d.setDate(1);                 // 말일 넘침 방지
   d.setMonth(d.getMonth()-(SALESMONTHS-1));
   return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2); }
+// 플로우텍이 수입품을 전담해 들여와 태성정밀로 '판매'로 넘기고, 반대 방향도 있다.
+// 이건 그룹 안에서 창고만 옮긴 것이라 바깥으로 나간 수요가 아니다.
+// 재고는 두 회사를 합쳐 보고 있으므로 그냥 더하면 같은 물량을 두 번 세게 된다.
+// 아래 두 이름만 그룹사다 — 태성산업·주)태성피앤씨 등은 이름만 비슷한 외부 거래처다.
+const GROUPCO = ['태성정밀(주)','플로우텍주식회사'];
 function erpSales_(rows,hi,D){
   const m=erpCols_(rows,hi), cC=m['품목코드'], cQ=m['수량'],
-        cN=erpCol_(m,['품목명','품명']), cD=erpCol_(m,['일자','날짜']);
+        cN=erpCol_(m,['품목명','품명']), cD=erpCol_(m,['일자','날짜']),
+        cV=erpCol_(m,['거래처명','거래처']);
   const cut=erpCutYM_();
-  let n=0, old=0;
+  if(!D.inter) D.inter={};
+  let n=0, old=0, grp=0;
   for(let i=hi+1;i&lt;rows.length;i++){ const r=rows[i]||[]; const c=erpNorm_(r[cC]);
     if(!c||c==='합계'||c==='합 계') continue;
     const q=erpNum_(r[cQ]); if(!q) continue;
     const ym=cD!=null?erpYM_(r[cD]):'';
     if(ym &amp;&amp; ym&lt;cut){ old++; continue; }             // 기간 밖 — 품명도 쓰지 않는다
-    D.sales[c]=(D.sales[c]||0)+q;
     const nm=cN!=null?erpNorm_(r[cN]):''; if(nm&amp;&amp;!D.name[c]) D.name[c]=nm;
     if(ym) D.months[ym]=1;
+    // 그룹사끼리의 이동은 따로 담아 둔다 (수요로 더하지는 않지만 버리지도 않는다)
+    if(cV!=null &amp;&amp; GROUPCO.indexOf(erpNorm_(r[cV]))&gt;=0){
+      D.inter[c]=(D.inter[c]||0)+q; grp++; continue; }
+    D.sales[c]=(D.sales[c]||0)+q;
     n++; }
-  return '판매 '+n+'건'+(old?' (기간 밖 '+old+'건 제외)':''); }
+  return '판매 '+n+'건'+(old?' (기간 밖 '+old+'건 제외)':'')
+         +(grp?' (그룹사 내부이동 '+grp+'건 따로)':''); }
 function erpCompute_(D){
   const months=Math.max(1, Object.keys(D.months).length);
   const ds={}; for(const c in D.sales) ds[c]=D.sales[c]/months;
@@ -961,14 +972,20 @@ function erpCompute_(D){
       delete seen[code];
     })(root, D.sales[root], 0);
     for(const c in out){ db[c]=(db[c]||0)+out[c]; (ct[c]=ct[c]||[]).push([root,out[c]]); } }
+  const iner=D.inter||{};
   const codes={};
-  [D.stock,ds,db,D.name,D.kind].forEach(o=&gt;{ for(const c in o) codes[c]=1; });
+  [D.stock,ds,db,D.name,D.kind,iner].forEach(o=&gt;{ for(const c in o) codes[c]=1; });
   const items={}; let n=0;
   for(const c in codes){
-    const a=ds[c]||0, b=(db[c]||0)/months, d=a+b, it={n:D.name[c]||''};
+    const a=ds[c]||0, b=(db[c]||0)/months, iv=(iner[c]||0)/months;
+    const it={n:D.name[c]||''};
+    // 내부이동은 더하지 않는다. 다만 포장재·부자재처럼 BOM 에도 없고 외부로 팔리지도
+    // 않는 품목은 '상대 회사가 그만큼 가져다 썼다'는 흔적이 이것뿐이라, 더 큰 쪽을 쓴다.
+    let d=a+b; if(iv&gt;d) d=iv;
     if(D.stock[c]!=null) it.s=Math.round(D.stock[c]*100)/100;
     if(D.kind[c]) it.k=D.kind[c];
-    if(d&gt;0){ it.d=Math.round(d*10)/10; it.ds=Math.round(a*10)/10; it.db=Math.round(b*10)/10; }
+    if(d&gt;0){ it.d=Math.round(d*10)/10; it.ds=Math.round(a*10)/10; it.db=Math.round(b*10)/10;
+             if(iv&gt;a+b) it.di=Math.round(iv*10)/10; }
     const l=ct[c];
     if(l&amp;&amp;l.length){ l.sort((x,y)=&gt;y[1]-x[1]); it.t=l.slice(0,3).map(x=&gt;D.name[x[0]]||x[0]); }
     items[c]=it; n++; }
@@ -2064,10 +2081,15 @@ function erpBlob_(){
     return "unknown";
   }
   const ERPTAG={bom:"BOM", stock:"재고현황", sales:"판매현황", master:"품목 기준정보", unknown:"자동 인식"};
+  // 플로우텍이 수입품을 전담해 들여와 태성정밀로 '판매'로 넘기고, 반대 방향도 있다.
+  // 그룹 안에서 창고만 옮긴 것이라 바깥으로 나간 수요가 아니다 — 재고는 두 회사를
+  // 합쳐 보고 있으므로 그냥 더하면 같은 물량을 두 번 세게 된다.
+  // 이름만 비슷한 태성산업·주)태성피앤씨 등은 외부 거래처라 넣지 않는다.
+  const GROUPCO=["태성정밀(주)","플로우텍주식회사"];
 
   /* ---------- 분석 ---------- */
   async function erpBuild(files, log){
-    const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={};
+    const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={};
     let nBom=0, nStock=0, nSales=0, nMaster=0;
 
     for(const f of files){
@@ -2118,20 +2140,25 @@ function erpBlob_(){
       else if(type==="sales"){
         const hi=erpHeaderAt(rows,["품목코드","수량"]), m=erpCols(rows,hi);
         const cCode=m["품목코드"], cQty=m["수량"],
-              cName=erpCol(m,["품목명","품명"]), cDate=erpCol(m,["일자","일 자","날짜"]);
-        let n=0;
+              cName=erpCol(m,["품목명","품명"]), cDate=erpCol(m,["일자","일 자","날짜"]),
+              cCust=erpCol(m,["거래처명","거래처"]);
+        let n=0, grp=0;
         for(let i=hi+1;i<rows.length;i++){
           const r=rows[i]||[]; const c=erpNorm(r[cCode]);
           if(!c || /^합\s*계$/.test(c)) continue;
           const q=erpNum(r[cQty]); if(!q) continue;
-          sales[c]=(sales[c]||0)+q;
           const nm=cName!=null?erpNorm(r[cName]):"";
           if(nm && !name[c]) name[c]=nm;
           const ym=cDate!=null?erpYM(r[cDate]):"";
           if(ym) monthSet[ym]=1;
+          // 그룹사끼리 넘긴 물량은 그룹 밖으로 나간 수요가 아니다 (아래 3)에서 따로 본다)
+          if(cCust!=null && GROUPCO.indexOf(erpNorm(r[cCust]))>=0){
+            inter[c]=(inter[c]||0)+q; grp++; continue;
+          }
+          sales[c]=(sales[c]||0)+q;
           n++;
         }
-        nSales+=n; log(`  판매 ${n.toLocaleString()}건`);
+        nSales+=n; log(`  판매 ${n.toLocaleString()}건${grp?` (그룹사 내부이동 ${grp.toLocaleString()}건 따로)`:""}`);
       }
       else if(type==="master"){
         // 품목등록(기준정보) — 재고 없이 품명·품목구분만 준다
@@ -2191,18 +2218,23 @@ function erpBlob_(){
     }
     if(budget<=0) log("  ⚠ BOM 구조가 너무 깊어 일부는 생략했습니다");
 
-    // 3) 합치기 — 직접 판매 + 생산 투입을 더해야 실제 소요량이 나온다
+    // 3) 합치기 — 직접 판매 + 생산 투입을 더해야 실제 소요량이 나온다.
+    //    그룹사 내부이동은 더하지 않는다. 다만 포장재·부자재처럼 BOM 에도 없고
+    //    외부로 팔리지도 않는 품목은 '상대 회사가 그만큼 가져다 썼다'는 흔적이
+    //    이것뿐이라, 외부판매+BOM 이 그보다 적으면 내부이동량을 대신 쓴다.
     const codes={};
-    [stock,ds,db,name,kind].forEach(o=>{ for(const c in o) codes[c]=1; });
+    [stock,ds,db,name,kind,inter].forEach(o=>{ for(const c in o) codes[c]=1; });
     const items={};
     let both=0;
     for(const c in codes){
-      const a=ds[c]||0, b=(db[c]||0)/months, d=a+b;
+      const a=ds[c]||0, b=(db[c]||0)/months, iv=(inter[c]||0)/months;
+      let d=a+b; if(iv>d) d=iv;
       if(a>0 && b>0) both++;
       const it={ n:name[c]||"" };
       if(stock[c]!=null) it.s=Math.round(stock[c]*100)/100;
       if(kind[c]) it.k=kind[c];
-      if(d>0){ it.d=Math.round(d*10)/10; it.ds=Math.round(a*10)/10; it.db=Math.round(b*10)/10; }
+      if(d>0){ it.d=Math.round(d*10)/10; it.ds=Math.round(a*10)/10; it.db=Math.round(b*10)/10;
+               if(iv>a+b) it.di=Math.round(iv*10)/10; }
       const ct=contrib[c];
       if(ct && ct.length){
         ct.sort((x,y)=>y[1]-x[1]);
@@ -2314,7 +2346,10 @@ function erpBlob_(){
     const tone=erpTone(left);
 
     let src;
-    if(it.ds>0 && it.db>0)
+    if(it.di>0)
+      src=`<b>그룹사 내부이동</b> 월 ${erpN(it.di)} 기준 — 플로우텍↔태성정밀 사이에 넘긴 양입니다.`
+        + ` 외부 판매도 BOM 도 없어 이것으로 소요량을 봅니다`;
+    else if(it.ds>0 && it.db>0)
       src=`<b>직접 판매</b> 월 ${erpN(it.ds)} <span style="color:var(--faint)">＋</span> <b>생산 투입</b> 월 ${erpN(it.db)} 합산`;
     else if(it.db>0) src=`<b>BOM 전개</b> — 이 품목이 들어가는 제품의 판매량으로 역산`;
     else if(it.ds>0) src=`<b>직접 판매</b> 실적 기준`;
