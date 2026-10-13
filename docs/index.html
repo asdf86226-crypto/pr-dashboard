@@ -893,16 +893,21 @@ function erpMaster_(rows,hi,D){
 function erpBom_(rows,hi,D){
   const m=erpCols_(rows,hi), cP=m['생산품목코드'], cC=m['소모품목코드'],
         cPn=m['생산품목명'], cCn=m['소모품목명'], cM=erpCol_(m,['생산수량']), cU=erpCol_(m,['소요량']);
-  let n=0;
+  // 같은 (생산품목, 소모품목) 관계가 두 회사 BOM 파일에 모두 들어 있는 경우가 많다.
+  // 그대로 두면 한 제품이 팔릴 때 같은 부품을 두 번 소모한 것으로 계산된다.
+  // 판매량은 이미 두 회사를 합친 값이므로 관계는 한 번만 세어야 한다.
+  if(!D.bomIx) D.bomIx={};
+  let n=0, dup=0;
   for(let i=hi+1;i&lt;rows.length;i++){ const r=rows[i]||[];
     const p=erpNorm_(r[cP]), c=erpNorm_(r[cC]); if(!p||!c) continue;
     const mk=erpNum_(r[cM])||1, us=erpNum_(r[cU]); if(!us) continue;
-    (D.bom[p]=D.bom[p]||[]).push([c, us/mk]);
+    const q=us/mk, key=p+'\u0001'+c, arr=(D.bom[p]=D.bom[p]||[]), at=D.bomIx[key];
+    if(at==null){ D.bomIx[key]=arr.length; arr.push([c,q]); n++; }
+    else { if(q&gt;arr[at][1]) arr[at][1]=q; dup++; }   // 소요량이 다르면 큰 쪽을 남긴다
     const pn=cPn!=null?erpNorm_(r[cPn]):'', cn=cCn!=null?erpNorm_(r[cCn]):'';
     if(pn&amp;&amp;!D.name[p]) D.name[p]=pn;
-    if(cn&amp;&amp;!D.name[c]) D.name[c]=cn;
-    n++; }
-  return 'BOM '+n+'건'; }
+    if(cn&amp;&amp;!D.name[c]) D.name[c]=cn; }
+  return 'BOM '+n+'건'+(dup?' (다른 파일과 겹치는 '+dup+'건 제외)':''); }
 function erpStock_(rows,hi,D){
   const m=erpCols_(rows,hi), cC=m['품목코드'], cQ=m['재고수량'],
         cN=erpCol_(m,['품명및규격','품목명[규격]','품목명','품명']), cK=erpCol_(m,['품목구분']);
