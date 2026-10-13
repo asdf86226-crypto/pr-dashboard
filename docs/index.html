@@ -855,9 +855,9 @@ function erpNum_(v){
 function erpYM_(v){
   if(v instanceof Date) return v.getFullYear()+'-'+('0'+(v.getMonth()+1)).slice(-2);
   const s=erpNorm_(v);
-  // 20250102 처럼 구분자 없이 붙여 내보내는 서식도 있다. 엑셀 일련번호(5자리)와
-  // 헷갈리지 않도록 '8자리'로 못박아 먼저 처리한다.
-  const d8=s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  // 20250102 처럼 구분자 없이 붙이거나, 20250304-17 처럼 전표번호가 붙어 나오기도 한다.
+  // 엑셀 일련번호(5자리)와 헷갈리지 않도록 '앞 8자리'로 못박아 먼저 처리한다.
+  const d8=s.match(/^(\d{4})(\d{2})(\d{2})(?:[^\d].*)?$/);
   if(d8 &amp;&amp; +d8[2]&gt;=1 &amp;&amp; +d8[2]&lt;=12) return d8[1]+'-'+d8[2];
   const m=s.match(/(\d{4})\D{1,2}(\d{1,2})(?:\D|$)/);
   if(m) return m[1]+'-'+('0'+m[2]).slice(-2);
@@ -874,6 +874,12 @@ function erpHead_(rows,keys){
 function erpCols_(rows,hi){ const m={};
   (rows[hi]||[]).forEach((c,i)=&gt;{ const k=erpHdr_(c); if(k&amp;&amp;m[k]==null) m[k]=i; }); return m; }
 function erpCol_(m,names){ for(let i=0;i&lt;names.length;i++) if(m[names[i]]!=null) return m[names[i]]; return null; }
+// 내보내기 서식마다 열 이름이 조금씩 다르다('일자-No.', '판매일자' …).
+// 정확히 같은 이름이 없을 때 '일자'·'날짜'가 들어간 열을 찾아 쓴다.
+function erpColLike_(m,keys){
+  for(const h in m) for(let i=0;i&lt;keys.length;i++)
+    if(h.indexOf(keys[i])&gt;=0) return m[h];
+  return null; }
 function erpFile_(f,D){
   const rows=erpRows_(f);
   if(rows===null) return '건너뜀 (엑셀·CSV·구글시트가 아님)';
@@ -946,8 +952,11 @@ function erpCo_(v){
   return erpNorm_(v).replace(/\s+/g,'').replace(/㈜|\(주\)|주\)|\(유\)|유\)|주식회사|유한회사/g,''); }
 function erpSales_(rows,hi,D){
   const m=erpCols_(rows,hi), cC=m['품목코드'], cQ=m['수량'],
-        cN=erpCol_(m,['품목명','품명']), cD=erpCol_(m,['일자','날짜']),
+        cN=erpCol_(m,['품목명','품명']),
         cV=erpCol_(m,['거래처명','거래처']);
+  // 일자가 없으면 기간을 가릴 수 없어 오래된 판매까지 다 섞인다. 이름 변형까지 찾아본다.
+  let cD=erpCol_(m,['일자','날짜','판매일자','매출일자','출고일자','전표일자']);
+  if(cD==null) cD=erpColLike_(m,['일자','날짜']);
   const cut=erpCutYM_();
   if(!D.inter) D.inter={};
   let n=0, old=0, grp=0, nody=0;
@@ -968,7 +977,9 @@ function erpSales_(rows,hi,D){
          +(grp?' (그룹사 내부이동 '+grp+'건 따로)':'')
          // 열이 없거나 날짜를 못 읽으면 조용히 옛 계산으로 돌아간다 — 반드시 알린다
          +(cV==null?' ⚠ 거래처명 열이 없어 그룹사 내부이동을 가려내지 못했습니다':'')
-         +(cD==null?' ⚠ 일자 열이 없어 기간을 가려내지 못했습니다'
+         // 어떤 열이 들어 있는지 같이 보여줘야 무엇을 다시 받아야 할지 알 수 있다
+         +(cD==null?' ⚠ 일자 열이 없어 기간을 가려내지 못했습니다 — 이 파일의 열: '
+                    +Object.keys(m).join(', ').substring(0,200)
             : (nody?' ⚠ 일자를 못 읽은 '+nody+'건은 기간과 상관없이 집계했습니다':'')); }
 function erpCompute_(D){
   const months=Math.max(1, Object.keys(D.months).length);
@@ -1975,7 +1986,7 @@ function erpBlob_(){
     const s=erpNorm(v).replace(/\//g,"-");
     // 20250102 처럼 구분자 없이 붙여 내보내는 서식도 있다.
     // 엑셀 일련번호(5자리)와 헷갈리지 않도록 '8자리'로 못박아 먼저 처리한다.
-    const d8=s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    const d8=s.match(/^(\d{4})(\d{2})(\d{2})(?:[^\d].*)?$/);
     if(d8 && +d8[2]>=1 && +d8[2]<=12) return d8[1]+"-"+d8[2];
     const m=s.match(/^(\d{4})-(\d{1,2})/);
     if(m) return m[1]+"-"+String(m[2]).padStart(2,"0");
@@ -2082,6 +2093,12 @@ function erpBlob_(){
     return m;
   }
   function erpCol(m, names){ for(const n of names) if(m[n]!=null) return m[n]; return null; }
+  // 내보내기 서식마다 열 이름이 조금씩 다르다("일자-No.", "판매일자" …).
+  // 정확히 같은 이름이 없을 때 "일자"·"날짜"가 들어간 열을 찾아 쓴다.
+  function erpColLike(m, keys){
+    for(const h in m) for(const k of keys) if(h.indexOf(k)>=0) return m[h];
+    return null;
+  }
   // 품목구분이 '원재료' 처럼 대괄호 없이 올 수도 있다 — 전개 중단 판정과 맞춘다
   function erpBracket(v){ const s=erpNorm(v); if(!s) return "";
     return s.charAt(0)==="[" ? s : "["+s+"]"; }
@@ -2165,8 +2182,10 @@ function erpBlob_(){
       else if(type==="sales"){
         const hi=erpHeaderAt(rows,["품목코드","수량"]), m=erpCols(rows,hi);
         const cCode=m["품목코드"], cQty=m["수량"],
-              cName=erpCol(m,["품목명","품명"]), cDate=erpCol(m,["일자","일 자","날짜"]),
+              cName=erpCol(m,["품목명","품명"]),
               cCust=erpCol(m,["거래처명","거래처"]);
+        const cDate=erpCol(m,["일자","일 자","날짜","판매일자","매출일자","출고일자","전표일자"])
+                 ?? erpColLike(m,["일자","날짜"]);
         let n=0, grp=0;
         for(let i=hi+1;i<rows.length;i++){
           const r=rows[i]||[]; const c=erpNorm(r[cCode]);
