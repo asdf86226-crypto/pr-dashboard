@@ -931,7 +931,11 @@ function erpCutYM_(){
 // 이건 그룹 안에서 창고만 옮긴 것이라 바깥으로 나간 수요가 아니다.
 // 재고는 두 회사를 합쳐 보고 있으므로 그냥 더하면 같은 물량을 두 번 세게 된다.
 // 아래 두 이름만 그룹사다 — 태성산업·주)태성피앤씨 등은 이름만 비슷한 외부 거래처다.
-const GROUPCO = ['태성정밀(주)','플로우텍주식회사'];
+const GROUPCO = ['태성정밀','플로우텍'];
+// 내보내기 서식에 따라 (주)·㈜·주식회사가 붙었다 빠졌다 한다. 떼고 나서 정확히 비교한다.
+// 떼고도 '태성산업'·'태성피앤씨'·'태성'은 그대로라 걸리지 않는다.
+function erpCo_(v){
+  return erpNorm_(v).replace(/\s+/g,'').replace(/㈜|\(주\)|주\)|\(유\)|유\)|주식회사|유한회사/g,''); }
 function erpSales_(rows,hi,D){
   const m=erpCols_(rows,hi), cC=m['품목코드'], cQ=m['수량'],
         cN=erpCol_(m,['품목명','품명']), cD=erpCol_(m,['일자','날짜']),
@@ -947,12 +951,14 @@ function erpSales_(rows,hi,D){
     const nm=cN!=null?erpNorm_(r[cN]):''; if(nm&amp;&amp;!D.name[c]) D.name[c]=nm;
     if(ym) D.months[ym]=1;
     // 그룹사끼리의 이동은 따로 담아 둔다 (수요로 더하지는 않지만 버리지도 않는다)
-    if(cV!=null &amp;&amp; GROUPCO.indexOf(erpNorm_(r[cV]))&gt;=0){
+    if(cV!=null &amp;&amp; GROUPCO.indexOf(erpCo_(r[cV]))&gt;=0){
       D.inter[c]=(D.inter[c]||0)+q; grp++; continue; }
     D.sales[c]=(D.sales[c]||0)+q;
     n++; }
   return '판매 '+n+'건'+(old?' (기간 밖 '+old+'건 제외)':'')
-         +(grp?' (그룹사 내부이동 '+grp+'건 따로)':''); }
+         +(grp?' (그룹사 내부이동 '+grp+'건 따로)':'')
+         // 거래처명이 없으면 내부이동을 가려낼 수 없다 — 조용히 넘어가면 안 된다
+         +(cV==null?' ⚠ 거래처명 열이 없어 그룹사 내부이동을 가려내지 못했습니다':''); }
 function erpCompute_(D){
   const months=Math.max(1, Object.keys(D.months).length);
   const ds={}; for(const c in D.sales) ds[c]=D.sales[c]/months;
@@ -2085,7 +2091,11 @@ function erpBlob_(){
   // 그룹 안에서 창고만 옮긴 것이라 바깥으로 나간 수요가 아니다 — 재고는 두 회사를
   // 합쳐 보고 있으므로 그냥 더하면 같은 물량을 두 번 세게 된다.
   // 이름만 비슷한 태성산업·주)태성피앤씨 등은 외부 거래처라 넣지 않는다.
-  const GROUPCO=["태성정밀(주)","플로우텍주식회사"];
+  // 내보내기 서식에 따라 (주)·㈜·주식회사가 붙었다 빠졌다 하므로 떼고 나서 정확히 비교한다.
+  const GROUPCO=["태성정밀","플로우텍"];
+  function erpCo(v){
+    return erpNorm(v).replace(/\s+/g,"").replace(/㈜|\(주\)|주\)|\(유\)|유\)|주식회사|유한회사/g,"");
+  }
 
   /* ---------- 분석 ---------- */
   async function erpBuild(files, log){
@@ -2152,13 +2162,15 @@ function erpBlob_(){
           const ym=cDate!=null?erpYM(r[cDate]):"";
           if(ym) monthSet[ym]=1;
           // 그룹사끼리 넘긴 물량은 그룹 밖으로 나간 수요가 아니다 (아래 3)에서 따로 본다)
-          if(cCust!=null && GROUPCO.indexOf(erpNorm(r[cCust]))>=0){
+          if(cCust!=null && GROUPCO.indexOf(erpCo(r[cCust]))>=0){
             inter[c]=(inter[c]||0)+q; grp++; continue;
           }
           sales[c]=(sales[c]||0)+q;
           n++;
         }
-        nSales+=n; log(`  판매 ${n.toLocaleString()}건${grp?` (그룹사 내부이동 ${grp.toLocaleString()}건 따로)`:""}`);
+        nSales+=n;
+        log(`  판매 ${n.toLocaleString()}건${grp?` (그룹사 내부이동 ${grp.toLocaleString()}건 따로)`:""}`
+          + (cCust==null?"  ⚠ 거래처명 열이 없어 그룹사 내부이동을 가려내지 못했습니다":""));
       }
       else if(type==="master"){
         // 품목등록(기준정보) — 재고 없이 품명·품목구분만 준다
