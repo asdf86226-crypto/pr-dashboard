@@ -490,6 +490,8 @@
             display:flex; align-items:center; gap:8px; flex-wrap:wrap}
   .erp-meta .linkbtn{margin-left:auto; padding:4px 8px; font-size:11px}
   .stock-note{display:block; font-size:11px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums}
+  .po-note{display:block; font-size:11px; font-weight:700; margin-top:3px; color:var(--accent); white-space:nowrap}
+  .po-note.done{color:var(--muted)}
   .qty-note{display:block; font-size:11px; font-weight:700; margin-top:3px; color:var(--accent);
             font-variant-numeric:tabular-nums; white-space:nowrap}
   .legend{display:inline-flex; align-items:center; gap:12px; font-size:11.5px; color:var(--muted); font-weight:600}
@@ -561,6 +563,7 @@
       <span class="brand-sub">개발 · 자재 · 생산 · 품질</span>
     </div>
     <button class="guide-btn" id="guideBtn" title="사용설명서 열기">📖 사용설명서</button>
+    <a class="sync-btn" id="poLink" href="../po-dashboard/" title="발주현황 대시보드로 이동합니다" style="display:none; text-decoration:none">🧾 발주현황</a>
     <button class="sync-btn" id="erpTopBtn" title="ERP 재고·판매 데이터 상태 확인 / 불러오기">📦 <span id="erpTopLabel">ERP 데이터</span></button>
     <button class="conn local" id="connBtn" title="공유 연결 설정"><span class="dot"></span><span id="connLabel">로컬 저장</span></button>
     <button class="sync-btn" id="refreshBtn" title="구글 시트에서 최신 내용을 다시 불러옵니다" style="display:none">⟳ 새로고침</button>
@@ -642,11 +645,12 @@ function doGet(e){ const p=e.parameter||{};
   if(p.erp==='data'){ const b=erpBlob_();
     return p.callback ? ContentService.createTextOutput(p.callback+'({"ok":true,"erp":'+(b||'null')+'})').setMimeType(ContentService.MimeType.JAVASCRIPT)
                       : ContentService.createTextOutput(b||'null').setMimeType(ContentService.MimeType.JSON); }
-  return jsonp_(p.callback,{ok:true,rows:read_()}); }
+  return jsonp_(p.callback,{ok:true,rows:withPo_(read_())}); }
 function doPost(e){ const b=JSON.parse(e.postData.contents||'{}');
   // 재고 수신·갱신 요청은 구매요청 시트를 건드릴 필요가 없으므로 먼저 처리하고 끝낸다
   if(b.action==='erprun'){ ScriptApp.newTrigger('erpRefreshOnce').timeBased().after(5000).create(); return json_({ok:true}); }
   if(b.action==='stock'){ const n=erpApplyStockFrom_(b); return json_({ok:true,n:n}); }
+  if(b.action==='poStatus'){ return json_({ok:true,n:poStatusSave_(b)}); }
   const s=sh_();
   const v=s.getDataRange().getValues(), h=v[0], idc=h.indexOf('id');
   if(b.action==='add'){ fixFormat_(s);
@@ -1133,7 +1137,29 @@ function erpSaveBom_(D){
 function erpBomBlob_(){
   const s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(BOMSHEET);
   if(!s||s.getLastRow()&lt;1) return '';
-  return s.getRange(1,1,s.getLastRow(),1).getValues().map(r=&gt;r[0]).join(''); }</div>
+  return s.getRange(1,1,s.getLastRow(),1).getValues().map(r=&gt;r[0]).join(''); }
+// ===== 발주현황 대시보드가 보내주는 발주 진행 상태 =====
+// 구매요청에서 넘어간 건(id)의 단계 · 입고예정일만 받는다. 공급사 · 금액은 받지 않는다.
+const POSHEET='po_status';
+function poStatusSave_(b){
+  const items=(b.items||[]).map(function(x){ return {id:String(x.id||''), kind:String(x.kind||''),
+    stage:String(x.stage||''), step:Number(x.step)||0, steps:Number(x.steps)||0,
+    eta:String(x.eta||''), done:String(x.done||'')}; }).filter(function(x){ return x.id; });
+  const ss=SpreadsheetApp.getActiveSpreadsheet();
+  let s=ss.getSheetByName(POSHEET); if(!s) s=ss.insertSheet(POSHEET);
+  s.clear();
+  const js=JSON.stringify({at:String(b.at||''), items:items}), out=[];
+  for(let i=0;i&lt;js.length;i+=ERPCHUNK) out.push([js.substr(i,ERPCHUNK)]);
+  if(!out.length) out.push(['']);
+  s.getRange(1,1,out.length,1).setNumberFormat('@').setValues(out);
+  return items.length; }
+function withPo_(rows){
+  const s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(POSHEET);
+  if(!s||s.getLastRow()&lt;1) return rows;
+  let o; try{ o=JSON.parse(s.getRange(1,1,s.getLastRow(),1).getValues().map(r=&gt;r[0]).join('')); }catch(e){ return rows; }
+  const m={}; (o.items||[]).forEach(function(x){ m[x.id]=x; });
+  rows.forEach(function(r){ const x=m[String(r.id)]; if(x) r.po=x; });
+  return rows; }</div>
       <div class="stage"><span class="n">2</span>웹앱으로 배포</div>
       <ol class="steps">
         <li>우측 상단 <b>배포 → 새 배포</b> → 유형 <b>웹 앱</b></li>
@@ -1801,7 +1827,8 @@ function erpBomBlob_(){
         dueDate:normDate_(r.dueDate),
         requester:r.requester!=null?String(r.requester):"",
         note:r.note!=null?String(r.note):"",
-        createdAt:normDate_(r.createdAt)||todayISO()
+        createdAt:normDate_(r.createdAt)||todayISO(),
+        po:(r.po && typeof r.po==="object") ? r.po : null      // 발주현황 대시보드의 진행 상태(있을 때만)
       })).filter(x=>x.id&&(x.code||x.itemName));
     },
     async add(items){ await post_("add",{items:items.map(cleanItem_)}); },
@@ -2659,6 +2686,13 @@ function erpBomBlob_(){
     return `<span class="qty-note" title="${esc(tip)}">+${add.toFixed(1)}개월</span>`;
   }
   // 목록 표의 품명 아래에 붙는 한 줄 요약
+  // 발주현황 대시보드가 보내준 진행 상태 — "내 요청이 어디까지 왔는지"
+  function poNote(d){
+    const x=d.po; if(!x || !x.stage) return "";
+    const when = x.done ? "입고 "+fmtDate(x.done) : (x.eta ? "입고예정 "+fmtDate(x.eta) : "");
+    const tip = `발주현황 기준 · ${x.kind||""}발주 ${x.step||0}/${x.steps||0}단계`;
+    return `<span class="po-note${x.done?" done":""}" title="${esc(tip)}">🧾 ${esc(x.stage)}${when?" · "+esc(when):""}</span>`;
+  }
   function erpRowNote(code){
     const hit=erpFind(code); if(!hit) return "";
     const it=hit.it;
@@ -2917,7 +2951,7 @@ function erpBomBlob_(){
         <td class="code">${esc(d.code)}</td>
         <td class="name">${esc(d.itemName)}${d.requester?`<span class="memo">요청: ${esc(d.requester)}</span>`:""}${erpRowNote(d.code)}</td>
         <td class="qty num">${esc(d.qty)}${erpQtyNote(d)}</td>
-        <td class="duedate"><span style="white-space:nowrap">${fmtDate(d.dueDate)}</span></td>
+        <td class="duedate"><span style="white-space:nowrap">${fmtDate(d.dueDate)}</span>${poNote(d)}</td>
         <td><span class="memo" title="${esc(d.note)}">${esc(d.note)||"–"}</span></td>
         <td><div class="rowbtns">
           ${d._pending?"":`<button class="del" data-act="edit" data-id="${d.id}" title="수정">✎</button>
@@ -3739,6 +3773,8 @@ function erpBomBlob_(){
   }
   applyCfg();
   refresh({quiet:true});
+  // 발주현황 대시보드를 쓰는 브라우저(같은 사이트에 발주 자료가 있음)에서만 이동 버튼을 보인다
+  try{ if(localStorage.getItem("po_dash:pos")) $("#poLink").style.display=""; }catch(e){}
 
   // ERP 데이터 — 저장본을 먼저 보여주고, 뒤이어 최신본이 있으면 갈아끼운다.
   // 구매요청 목록 조회가 우선이므로 구글 호출은 뒤로 미루고, 조회가 성공했을 때만 시도한다.
