@@ -634,8 +634,11 @@ function html_(m){ return HtmlService.createHtmlOutput('&lt;meta charset="utf-8"
 function doGet(e){ const p=e.parameter||{};
   if(p.code) return kakaoCb_(p.code);
   if(p.kakao_setup) return kakaoStart_(p.key);
-  if(p.erp==='meta') return jsonp_(p.callback,{ok:true,ver:P.getProperty('ERP_VER')||'',folder:erpFolderUrl_(),
+  if(p.erp==='meta') return jsonp_(p.callback,{ok:true,ver:P.getProperty('ERP_VER')||'',bomVer:P.getProperty('ERP_BOM_VER')||'',folder:erpFolderUrl_(),
     log:(P.getProperty('ERP_LOG')||'')+(P.getProperty('ERP_STOCK_LOG')?'\n'+P.getProperty('ERP_STOCK_LOG'):'')});
+  if(p.erp==='bom'){ const b=erpBomBlob_();
+    return p.callback ? ContentService.createTextOutput(p.callback+'({"ok":true,"bom":'+(b||'null')+'})').setMimeType(ContentService.MimeType.JAVASCRIPT)
+                      : ContentService.createTextOutput(b||'null').setMimeType(ContentService.MimeType.JSON); }
   if(p.erp==='data'){ const b=erpBlob_();
     return p.callback ? ContentService.createTextOutput(p.callback+'({"ok":true,"erp":'+(b||'null')+'})').setMimeType(ContentService.MimeType.JAVASCRIPT)
                       : ContentService.createTextOutput(b||'null').setMimeType(ContentService.MimeType.JSON); }
@@ -763,7 +766,7 @@ function erpRun_(){
   if(!n) throw new Error('폴더가 비어 있습니다 — ERP 파일을 넣어주세요 (하위 폴더도 함께 읽습니다)');
   const mn=erpMergeMaster_(D);
   if(mn) log.push('· 이카운트 품목정보로 품목구분 '+mn+'건을 보충(계산 전)');
-  const out=erpCompute_(D); erpSave_(out);
+  const out=erpCompute_(D); erpSave_(out); erpSaveBom_(D);
   const sn=erpApplyStock_(); if(sn) log.push('· PC에서 받아둔 재고 '+sn+'품목을 다시 반영');
   const now=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'HH:mm');
   const s='ERP 갱신 '+out.updatedAt+' '+now+' · '+Math.round((Date.now()-t0)/1000)+'초 · 품목 '+out.n+'개 · 판매 '+out.months+'개월'
@@ -1108,6 +1111,28 @@ function erpApplyStock_(){
 function erpBlob_(){
   const s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ERPSHEET);
   if(!s||s.getLastRow()&lt;1) return '';
+  return s.getRange(1,1,s.getLastRow(),1).getValues().map(r=&gt;r[0]).join(''); }
+// ===== 쉐어포인트(MMS) 모드: BOM 만 대시보드에 넘겨준다 =====
+// 재고·판매는 대시보드가 쉐어포인트에서 직접 받고, BOM 은 이 폴더의 파일을 새벽 계산 때 정리해 둔다.
+const BOMSHEET='erp_bom';
+function erpSaveBom_(D){
+  const rows=[], names={}, kinds={};
+  for(const p in D.bom) D.bom[p].forEach(function(x){
+    rows.push([p,x[0],Math.round(x[1]*1e6)/1e6]);
+    [p,x[0]].forEach(function(c){ if(D.name[c]) names[c]=D.name[c]; if(D.kind[c]) kinds[c]=D.kind[c]; }); });
+  const o={updatedAt:Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'yyyy-MM-dd HH:mm'),
+           n:rows.length, rows:rows, names:names, kinds:kinds};
+  const ss=SpreadsheetApp.getActiveSpreadsheet();
+  let s=ss.getSheetByName(BOMSHEET); if(!s) s=ss.insertSheet(BOMSHEET);
+  s.clear();
+  const js=JSON.stringify(o), out=[];
+  for(let i=0;i&lt;js.length;i+=ERPCHUNK) out.push([js.substr(i,ERPCHUNK)]);
+  if(!out.length) out.push(['']);
+  s.getRange(1,1,out.length,1).setNumberFormat('@').setValues(out);
+  P.setProperty('ERP_BOM_VER', o.updatedAt+'|'+o.n+'|'+js.length); }
+function erpBomBlob_(){
+  const s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(BOMSHEET);
+  if(!s||s.getLastRow()&lt;1) return '';
   return s.getRange(1,1,s.getLastRow(),1).getValues().map(r=&gt;r[0]).join(''); }</div>
       <div class="stage"><span class="n">2</span>웹앱으로 배포</div>
       <ol class="steps">
@@ -1371,7 +1396,18 @@ function erpBlob_(){
       <button class="x" id="erpClose">×</button>
     </div>
     <div class="mb">
-      <div class="stage"><span class="n">A</span>자동 갱신 <span class="badge-rec">권장</span></div>
+      <div class="stage"><span class="n">☁</span>쉐어포인트(MMS) 자동 연결 <span class="badge-rec">권장</span></div>
+      <p class="erp-hint">사내 로컬PC(MMS)가 <b>매시간</b> 쉐어포인트에 올리는 이카운트 <b>재고 · 판매 · 품목정보</b>를
+        받아 <b>이 화면에서 바로</b> 계산합니다. BOM 은 아래 A의 구글 드라이브 폴더 파일을 씁니다.</p>
+      <div class="erp-auto" id="erpSpBox"></div>
+      <div class="row-btns">
+        <button class="btn" id="erpSpConnect" type="button">☁ 쉐어포인트 연결</button>
+        <button class="btn ghost" id="erpSpOff" type="button" style="display:none">연결 해제</button>
+      </div>
+
+      <div class="erp-sep"></div>
+
+      <div class="stage"><span class="n">A</span>자동 갱신 (구글 드라이브)</div>
       <p class="erp-hint">ERP 파일을 <b>구글 드라이브 폴더에 넣어두기만</b> 하면 됩니다.
         매일 새벽 4시에 구글이 알아서 다시 계산해 <b>팀원 모두의 화면</b>에 반영합니다.</p>
 
@@ -1661,6 +1697,7 @@ function erpBlob_(){
 
 <div id="toast"></div>
 
+<script src="mms-sharepoint.js"></script>
 <script>
 (function(){
   "use strict";
@@ -1949,6 +1986,7 @@ function erpBlob_(){
   }
   async function syncErpFromSheet(force){
     if(!isConnected()) return false;
+    if(erpSpOn()) return false;                        // 쉐어포인트(MMS) 연결 중이면 그쪽 결과를 쓴다
     if(!force && !erpCheckDue()) return false;
     try{ localStorage.setItem(ERPCHECKKEY, String(Date.now())); }catch(e){}
     let meta;
@@ -1966,6 +2004,92 @@ function erpBlob_(){
     if(saveErpLocal(erp)){ try{ localStorage.setItem(ERPVERKEY, erpAuto.ver); }catch(e){} }
     return true;
   }
+  /* ---------- 쉐어포인트(MMS) 자동 연결 ----------
+   * 사내 로컬PC(MMS)가 평일 07~19시 매시간 이카운트 재고현황·판매현황(2022년~)·품목정보를
+   * 쉐어포인트 [TADC › 문서 › MMS/<회사>] 에 올린다. 회사 계정으로 로그인해 그 파일과,
+   * 구글 시트(Apps Script)가 새벽마다 드라이브 폴더 파일로 정리해 둔 BOM 으로 이 브라우저에서 계산한다.
+   * 파일이 바뀌지 않았으면(eTag · BOM 버전이 같으면) 다시 계산하지 않는다. */
+  const ERPSPKEY="erp_sp_state";
+  const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체"];   // 품목정보 먼저 — 품목구분 기준
+  let erpSpBusy=false, erpSpMsg="";
+  function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
+  function erpSpSave(o){ try{ o ? localStorage.setItem(ERPSPKEY, JSON.stringify(o)) : localStorage.removeItem(ERPSPKEY); }catch(e){} }
+  function erpSpOn(){ const s=erpSpState(); return !!(s && s.on && window.MmsSp); }
+  function erpCsvFile(name, header, rows){
+    const cell=v=>{ const t=String(v==null?"":v); return /[",\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
+    return new File([[header].concat(rows).map(r=>r.map(cell).join(",")).join("\n")], name, {type:"text/csv"});
+  }
+  async function syncErpFromSharePoint(interactive){
+    if(!window.MmsSp || erpSpBusy) return false;
+    erpSpBusy=true; renderErpSp();
+    try{
+      if(interactive) await MmsSp.token(true);        // 로그인 창은 버튼을 누른 직후에 띄워야 막히지 않는다
+      let bomVer="";
+      if(isConnected()){ try{ const meta=await jsonpGet(cfg.exec+"?erp=meta"); bomVer=(meta && meta.bomVer)||""; }catch(e){} }
+      const metas=[];
+      for(const rep of ERPSP_REPORTS) for(const co of MmsSp.COMPANIES){
+        const path=MmsSp.reportPath(co, rep);
+        try{ metas.push({co, rep, path, meta: await MmsSp.meta(path, false)}); }
+        catch(e){ if(e.status===404) continue; throw e; }   // 판매현황을 받지 않는 회사 등은 건너뛴다
+      }
+      if(!metas.some(m=>m.rep==="재고현황")) throw new Error("쉐어포인트 MMS 폴더에서 재고현황 파일을 찾지 못했습니다");
+      const sig=JSON.stringify([metas.map(m=>m.meta.eTag), bomVer]);
+      const st=erpSpState()||{};
+      if(!interactive && st.sig===sig && erp && erp.src==="sp") return false;
+      const files=[];
+      let bomNote="BOM 없음 — 월평균은 직접 판매만으로 계산 (구글 시트 연결·Apps Script 새 코드 필요)";
+      if(bomVer){
+        try{
+          const got=await jsonpGet(cfg.exec+"?erp=bom");
+          const b=got && got.bom;
+          if(b && b.rows && b.rows.length){
+            const nm=b.names||{}, kd=b.kinds||{};
+            const kc=Object.keys(kd);
+            if(kc.length) files.push(erpCsvFile("BOM_품목구분.csv", ["품목코드","품목구분"], kc.map(c=>[c, kd[c]])));
+            files.push(erpCsvFile("BOM.csv", ["생산품목코드","생산품목명","소모품목코드","소모품목명","생산수량","소요량"],
+              b.rows.map(r=>[r[0], nm[r[0]]||"", r[1], nm[r[1]]||"", 1, r[2]])));
+            bomNote=`BOM ${b.rows.length.toLocaleString()}건 (${String(b.updatedAt||"").slice(5,16)} 구글 드라이브 기준)`;
+          }
+        }catch(e){ console.warn("[ERP] BOM 받기 실패:", e); }
+      }
+      for(const m of metas){
+        const got=await MmsSp.download(m.path, false);
+        files.push(new File([got.bytes], `${m.co}_${m.rep}.xlsx`));
+      }
+      // 품목구분(품목정보·BOM)을 재고·판매보다 먼저 읽어야 BOM 전개를 원재료·상품에서 멈출 수 있다
+      files.sort((a,b)=>(/품목/.test(b.name)?1:0)-(/품목/.test(a.name)?1:0));
+      const lines=[];
+      const built=await erpBuild(files, t=>lines.push(t), {lastMonths:12});
+      const newest=metas.filter(m=>m.rep==="재고현황").map(m=>new Date(m.meta.lastModifiedDateTime)).sort((a,b)=>b-a)[0];
+      const p2=n=>String(n).padStart(2,"0");
+      built.stockAt=`${newest.getFullYear()}-${p2(newest.getMonth()+1)}-${p2(newest.getDate())} ${p2(newest.getHours())}:${p2(newest.getMinutes())}`;
+      built.src="sp"; built.bomNote=bomNote;
+      erp=built; saveErpLocal(built);
+      erpSpSave({on:true, sig, at:Date.now()});
+      erpSpMsg=`✅ 재고 ${built.stockAt} 기준 · 품목 ${(built.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${bomNote}`;
+      console.log("[ERP] 쉐어포인트 계산\n"+lines.join("\n"));
+      return true;
+    }catch(e){
+      console.warn("[ERP] 쉐어포인트 실패:", e);
+      const t=MmsSp.errorText(e);
+      erpSpMsg = t ? "⚠ "+t : "로그인을 취소했습니다";
+      if(interactive && t) toast("쉐어포인트 연결 실패 — "+t);
+      return false;
+    }finally{ erpSpBusy=false; renderErpSp(); }
+  }
+  function renderErpSp(){
+    const box=$("#erpSpBox"); if(!box) return;
+    const on=erpSpOn();
+    box.className="erp-auto"+(on?"":" off");
+    box.innerHTML = !window.MmsSp
+      ? `<div class="st"><span class="dot"></span>이 파일에서는 쓸 수 없습니다</div><div class="sub">인터넷 주소로 연 대시보드에서만 쉐어포인트에 연결됩니다.</div>`
+      : `<div class="st"><span class="dot"></span>${erpSpBusy ? "쉐어포인트에서 받아 계산하는 중…" : (on ? "쉐어포인트(MMS) 연결됨" : "연결 안 됨")}</div>
+         <div class="sub">${esc(erpSpMsg || (on ? "열 때마다 바뀐 파일이 있으면 다시 계산합니다." : "회사 마이크로소프트 계정으로 로그인합니다. 연결하면 아래 A·B 대신 이 결과를 씁니다."))}</div>`;
+    const c=$("#erpSpConnect"), o=$("#erpSpOff");
+    if(c){ c.disabled=erpSpBusy || !window.MmsSp; c.textContent = on ? "⟳ 지금 다시 받기" : "☁ 쉐어포인트 연결"; }
+    if(o) o.style.display = on ? "" : "none";
+  }
+
   // 갱신은 몇 분씩 걸리는 작업이다. 여러 번 누르면 그만큼 줄을 서서
   // 그동안 구매요청 조회까지 느려지므로 5분에 한 번만 받는다.
   let erpRunAt=0;
@@ -2138,7 +2262,13 @@ function erpBlob_(){
   }
 
   /* ---------- 분석 ---------- */
-  async function erpBuild(files, log){
+  // opts.lastMonths: 판매를 최근 N개월만 세고 N으로 나눈다(새벽 자동 계산과 같은 기준).
+  //   쉐어포인트 판매현황은 2022년부터 전부 들어 있어 기간을 잘라야 최근 수요가 묽어지지 않는다.
+  async function erpBuild(files, log, opts){
+    opts=opts||{};
+    let cutYM="";
+    if(opts.lastMonths){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-(opts.lastMonths-1));
+      cutYM=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
     const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={};
     let nBom=0, nStock=0, nSales=0, nMaster=0;
 
@@ -2181,7 +2311,7 @@ function erpBlob_(){
           stock[c]=(stock[c]||0)+erpNum(r[cQty]);      // 두 회사 재고는 합산
           const nm=cName!=null?erpNorm(r[cName]):"";
           if(nm && !name[c]) name[c]=nm;
-          const kd=cKind!=null?erpNorm(r[cKind]):"";
+          const kd=cKind!=null?erpBracket(r[cKind]):"";   // '원재료' → '[원재료]' (BOM 전개 멈춤 기준과 같은 모양)
           if(kd && !kind[c]) kind[c]=kd;
           n++;
         }
@@ -2190,8 +2320,8 @@ function erpBlob_(){
       else if(type==="sales"){
         const hi=erpHeaderAt(rows,["품목코드","수량"]), m=erpCols(rows,hi);
         const cCode=m["품목코드"], cQty=m["수량"],
-              cName=erpCol(m,["품목명","품명"]),
-              cCust=erpCol(m,["거래처명","거래처"]);
+              cName=erpCol(m,["품목명","품명","품목명(규격)","품목명[규격]"]),
+              cCust=erpCol(m,["거래처명","거래처","판매처명","판매처"]);
         const cDate=erpCol(m,["일자","일 자","날짜","판매일자","매출일자","출고일자","전표일자"])
                  ?? erpColLike(m,["일자","날짜"]);
         let n=0, grp=0;
@@ -2202,6 +2332,7 @@ function erpBlob_(){
           const nm=cName!=null?erpNorm(r[cName]):"";
           if(nm && !name[c]) name[c]=nm;
           const ym=cDate!=null?erpYM(r[cDate]):"";
+          if(cutYM && ym && ym<cutYM) continue;           // 기간 밖 판매는 세지 않는다
           if(ym) monthSet[ym]=1;
           // 그룹사끼리 넘긴 물량은 그룹 밖으로 나간 수요가 아니다 (아래 3)에서 따로 본다)
           if(cCust!=null && GROUPCO.indexOf(erpCo(r[cCust]))>=0){
@@ -2238,7 +2369,7 @@ function erpBlob_(){
 
     if(!nStock && !nSales && !nBom && !nMaster) throw new Error("읽을 수 있는 ERP 표를 찾지 못했습니다");
 
-    const months=Math.max(1, Object.keys(monthSet).length);
+    const months=opts.lastMonths || Math.max(1, Object.keys(monthSet).length);
     log(`\n집계 중 · 판매 기간 ${months}개월`);
     await new Promise(r=>setTimeout(r,0));
 
@@ -2674,10 +2805,23 @@ function erpBlob_(){
     if(tries<8) setTimeout(()=>pollErpAfterRefresh(tries+1), 30000);
     else toast("아직 결과가 없습니다 — 폴더에 파일이 들어 있는지 확인해 주세요");
   }
+  $("#erpSpConnect").onclick=async ()=>{
+    if(await syncErpFromSharePoint(true)){
+      renderErpPanel(); renderTable(); renderOrder();
+      toast("쉐어포인트 자료로 계산했습니다 — 품목 "+((erp && erp.n)||0).toLocaleString()+"개");
+    }
+  };
+  $("#erpSpOff").onclick=()=>{
+    if(!confirm("쉐어포인트 연결을 해제할까요?\n다음부터는 구글 시트(A)의 새벽 계산 결과를 씁니다.")) return;
+    erpSpSave(null); erpSpMsg="";
+    try{ localStorage.removeItem(ERPVERKEY); }catch(e){}     // 시트 결과를 다시 받도록
+    renderErpSp();
+    syncErpFromSheet(true).then(ch=>{ if(ch){ renderErpPanel(); renderTable(); renderOrder(); } });
+  };
   function openErp(){
     $("#erpClear").style.display = erp ? "inline-flex" : "none";
     $("#erpDownload").style.display = erp ? "" : "none";
-    renderErpAuto();
+    renderErpAuto(); renderErpSp();
     $("#erpBg").classList.add("show");
     // 열 때마다 상태를 한 번 확인(자동 갱신이 돌았는지)
     if(isConnected()) syncErpFromSheet(true).then(ch=>{
@@ -3606,7 +3750,10 @@ function erpBlob_(){
     renderErpPanel(); renderTable(); renderOrder();
     setTimeout(async ()=>{
       if(failStreak>0 || syncing) return;         // 목록 조회가 불안하면 건드리지 않는다
-      try{ if(await syncErpFromSheet()){ renderErpPanel(); renderTable(); renderOrder(); } }catch(e){}
+      try{
+        const ch = erpSpOn() ? await syncErpFromSharePoint(false) : await syncErpFromSheet();
+        if(ch){ renderErpPanel(); renderTable(); renderOrder(); }
+      }catch(e){}
     }, 3000);
   })();
 })();
