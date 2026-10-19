@@ -188,6 +188,9 @@
     .col-2,.col-3,.col-4{grid-column:span 1} .col-6,.col-8,.col-12{grid-column:span 2}
   }
   /* 팀별 분포 */
+  .donut-wrap{display:flex; align-items:center; gap:16px; margin-top:4px}
+  .donut-wrap .dnum{font-size:26px; font-weight:800; font-variant-numeric:tabular-nums}
+  .donut-wrap .dlbl{font-size:12px; color:var(--muted); font-weight:600}
   .dist{display:grid; grid-template-columns:repeat(4,1fr); gap:10px}
   @media (max-width:520px){ .dist{grid-template-columns:repeat(2,1fr)} }
   .dist-cell{border:1px solid var(--border); border-radius:5px; padding:10px 12px 11px;
@@ -2240,41 +2243,37 @@ function withPo_(rows){
   /* ---------- 렌더: 스탯 ---------- */
   function renderStats(){
     const total=data.length;
-    const today=todayISO();
-    const todayCnt=data.filter(d=>d.createdAt===today).length;
-    const qty=d=>parseFloat(String(d.qty).replace(/[^\d.\-]/g,""))||0;
-    const qtySum=data.reduce((s,d)=>s+qty(d),0);
-    const teamCnt={}; TEAMS.forEach(t=>teamCnt[t]=0);
-    let etcCnt=0;
-    data.forEach(d=>{ if(teamCnt[d.team]!=null) teamCnt[d.team]++; else etcCnt++; });
-    const activeTeams=TEAMS.filter(t=>teamCnt[t]>0).length;
+    // 완료 = 발주현황에서 입고일이 들어온 건, 진행 = 그 밖의 모든 요청(발주 전 포함)
+    const doneCnt=data.filter(d=>d.po && d.po.done).length;
+    const poCnt=data.filter(d=>d.po && d.po.stage && !d.po.done).length;
+    const waitCnt=total-doneCnt-poCnt;
+    const pct=total ? Math.round(doneCnt/total*100) : 0;
+    const C=2*Math.PI*21;
 
     const panels=[
-      {cls:"col-3", label:"전체 요청", num:total.toLocaleString(), lbl:"건"},
-      {cls:"col-3", label:"오늘 접수", num:todayCnt.toLocaleString(), lbl:"건",
+      {label:"전체 요청", num:total.toLocaleString(), lbl:"건",
        sub:`최근 접수 ${data.length?fmtDate([...data].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""))[0].createdAt):"–"}`},
-      {cls:"col-3", label:"총 수량", num:Math.round(qtySum).toLocaleString(), lbl:"개(합계)"},
-      {cls:"col-3", label:"요청 팀", num:activeTeams.toLocaleString(), lbl:`팀 / 전체 ${TEAMS.length}팀`},
+      {label:"진행중", num:(total-doneCnt).toLocaleString(), lbl:"건", sub:`발주 전 ${waitCnt} · 발주 진행 ${poCnt}`},
+      {label:"완료", num:doneCnt.toLocaleString(), lbl:"건 (입고완료)"},
     ];
-    const distCells=TEAMS.map(t=>`
-      <div class="dist-cell" style="--tc:var(${TEAMVAR[t]})">
-        <div class="dist-n">${teamCnt[t].toLocaleString()}</div>
-        <div class="dist-l">${t}</div>
-      </div>`).join("")
-      + (etcCnt?`<div class="dist-cell" style="--tc:var(--faint)">
-           <div class="dist-n">${etcCnt}</div><div class="dist-l">미지정</div></div>`:"");
-
     $("#stats").innerHTML =
       panels.map(p=>`
-        <div class="cpanel ${p.cls}">
+        <div class="cpanel col-3">
           <span class="clabel">${p.label}</span>
           <div class="kpi-num">${p.num}</div>
           <div class="kpi-lbl">${p.lbl}</div>
           ${p.sub?`<div class="kpi-sub">${p.sub}</div>`:""}
         </div>`).join("")
-      + `<div class="cpanel col-12">
-           <span class="clabel">팀별 요청 분포</span>
-           <div class="dist">${distCells}</div>
+      + `<div class="cpanel col-3">
+           <span class="clabel">종결 비율</span>
+           <div class="donut-wrap">
+             <svg width="58" height="58" viewBox="0 0 52 52" aria-hidden="true">
+               <circle cx="26" cy="26" r="21" fill="none" stroke="var(--border)" stroke-width="7"/>
+               <circle cx="26" cy="26" r="21" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"
+                 stroke-dasharray="${(pct/100*C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 26 26)"/>
+             </svg>
+             <div><div class="dnum">${pct}%</div><div class="dlbl">입고완료 ${doneCnt} / ${total}건</div></div>
+           </div>
          </div>`;
 
     const st=$("#stampDate");
