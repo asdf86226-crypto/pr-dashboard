@@ -559,8 +559,16 @@
             display:flex; align-items:center; gap:8px; flex-wrap:wrap}
   .erp-meta .linkbtn{margin-left:auto; padding:4px 8px; font-size:11px}
   .stock-note{display:block; font-size:11px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums}
-  .po-note{display:block; font-size:11px; font-weight:700; margin-top:3px; color:var(--accent); white-space:nowrap}
-  .po-note.done{color:var(--muted)}
+  /* 발주 단계별 색 — 준비중(회색) · 진행중(파랑) · 운송중(주황) · 입고완료(초록) · 검수 끝(진초록) */
+  .po-note{display:flex; width:fit-content; align-items:center; gap:5px; font-size:11px; font-weight:800; margin-top:4px; white-space:nowrap;
+    padding:2px 8px; border-radius:999px; color:var(--pc); background:color-mix(in srgb, var(--pc) 13%, transparent);
+    border:1px solid color-mix(in srgb, var(--pc) 35%, transparent)}
+  .po-note::before{content:""; width:7px; height:7px; border-radius:50%; background:var(--pc); flex:none}
+  .po-note.s1{--pc:#6b7280}
+  .po-note.s2{--pc:#2563eb}
+  .po-note.s3{--pc:#d97706}
+  .po-note.s4{--pc:#16a34a}
+  .po-note.s5{--pc:#0f766e}
   .qty-note{display:block; font-size:11px; font-weight:700; margin-top:3px; color:var(--accent);
             font-variant-numeric:tabular-nums; white-space:nowrap}
   .legend{display:inline-flex; align-items:center; gap:12px; font-size:11.5px; color:var(--muted); font-weight:600}
@@ -2273,7 +2281,8 @@ function withPo_(rows){
     const x=d.po; if(!x || !x.stage) return "";
     const when = x.done ? "입고 "+fmtDate(x.done) : (x.eta ? "입고예정 "+fmtDate(x.eta) : "");
     const tip = `발주현황 기준 · ${x.kind||""}발주 ${x.step||0}/${x.steps||0}단계`;
-    return `<span class="po-note${x.done?" done":""}" title="${esc(tip)}">🧾 ${esc(x.stage)}${when?" · "+esc(when):""}</span>`;
+    const st=Math.min(5, Math.max(1, +x.step||1));
+    return `<span class="po-note s${st}" title="${esc(tip)}">${esc(x.stage)}${when?" · "+esc(when):""}</span>`;
   }
   function erpRowNote(code){
     const hit=erpFind(code); if(!hit) return "";
