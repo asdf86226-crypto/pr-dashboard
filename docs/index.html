@@ -141,9 +141,11 @@
   .sal-top .pc{color:var(--muted); font-size:11.5px; font-variant-numeric:tabular-nums; min-width:38px; text-align:right}
   .sal-kpis .sal-top{font-size:12px; margin-top:8px}
   .sal-res .sal-top{max-width:560px}
-  .sal-row{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap}
+  .sal-row{display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap}
   .sal-row > .l{flex:0 1 560px; min-width:0}
-  .sal-mon{flex:1 1 300px; min-width:260px; align-self:stretch; display:flex; flex-direction:column}
+  .sal-mon{flex:1 1 300px; min-width:260px; align-self:stretch; display:flex; flex-direction:column;
+    margin-left:12px; padding-left:24px; border-left:1px solid var(--border)}
+  @media (max-width:900px){ .sal-mon{margin-left:0; padding-left:0; border-left:0; border-top:1px solid var(--border); padding-top:12px} }
   .sal-mon .t{font-size:12.5px; font-weight:800; margin-bottom:2px}
   .sal-mon .s{font-size:11px; color:var(--muted); margin-bottom:8px}
   .sal-bars{flex:1; min-height:170px; display:flex; align-items:flex-end; gap:2px; border-bottom:1px solid var(--border); position:relative; padding-top:18px}
