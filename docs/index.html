@@ -143,7 +143,9 @@
   .sal-res .sal-top{max-width:560px}
   .sal-row{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap}
   .sal-row > .l{flex:1 1 420px; min-width:0}
-  .sal-web{flex:0 1 340px; border-left:1px solid var(--border); padding-left:16px}
+  .sal-web{flex:0 1 auto; border-left:1px solid var(--border); padding-left:16px}
+  .sal-web .cols{display:flex; gap:14px; flex-wrap:wrap}
+  .sal-web .col{width:250px; max-width:100%}
   @media (max-width:900px){ .sal-web{border-left:0; padding-left:0; border-top:1px solid var(--border); padding-top:12px; flex-basis:100%} }
   .sal-web .t{font-size:12.5px; font-weight:800; margin-bottom:4px}
   .sal-web .d{font-size:11.5px; color:var(--muted); margin-bottom:8px; line-height:1.5}
@@ -151,7 +153,7 @@
   .sal-web a{display:block; text-align:center; padding:7px 6px; border:1px solid var(--border); border-radius:7px; font-size:12.5px; font-weight:700;
     color:var(--ink); text-decoration:none; background:var(--surface-2)}
   .sal-web a:hover{border-color:var(--accent); color:var(--accent)}
-  .sal-web .q2{margin-top:10px}
+  .sal-web .d b{white-space:nowrap}
 
   /* ---------- 발주 필요 ---------- */
   .ord{margin:16px 24px 40px}
@@ -2973,10 +2975,9 @@ function withPo_(rows){
   function salWeb(code){
     const c=String(code||"").trim(), base=c.replace(/\.[A-Za-z]{1,4}$/,"");
     const links=q=>SAL_SHOPS.map(([n,u])=>`<a href="${esc(u+encodeURIComponent(q))}" target="_blank" rel="noopener">${n}</a>`).join("");
-    return `<div class="sal-web"><div class="t">🛒 온라인 판매처 찾기</div>
-      <div class="d">누르면 그 쇼핑몰에서 <b>${esc(c)}</b> 검색 결과가 새 창으로 열립니다.</div>
-      <div class="g">${links(c)}</div>
-      ${base!==c?`<div class="d q2">색상 표기를 뺀 <b>${esc(base)}</b> 로 찾기</div><div class="g">${links(base)}</div>`:""}
+    const col=(label,q)=>`<div class="col"><div class="d">${label} <b>${esc(q)}</b></div><div class="g">${links(q)}</div></div>`;
+    return `<div class="sal-web"><div class="t">🛒 온라인 판매처 찾기 <span style="font-weight:600; color:var(--muted); font-size:11.5px">— 누르면 그 쇼핑몰 검색 결과가 새 창으로 열립니다</span></div>
+      <div class="cols">${col("품번 그대로", c)}${base!==c?col("색상 표기 뺀", base):""}</div>
     </div>`;
   }
   function salRecent(n){
