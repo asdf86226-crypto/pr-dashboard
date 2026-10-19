@@ -120,7 +120,7 @@
   .sal-quick{display:flex; gap:6px; flex-wrap:wrap; margin:-4px 0 12px}
   .sal-quick button{border:1px solid var(--border); background:var(--surface); color:var(--muted); font-weight:700; font-size:12px; height:28px; padding:0 10px; border-radius:7px}
   .sal-quick button:hover{color:var(--ink); border-color:var(--border-strong)}
-  .sal-kpis{grid-template-columns:repeat(3,1fr)}
+  .ord-kpis.sal-kpis{grid-template-columns:repeat(3,1fr)}
   .sal-list{border:1px solid var(--border); border-radius:10px; background:var(--surface); overflow:hidden; margin-bottom:12px}
   .sal-list .hd{font-size:12px; color:var(--muted); font-weight:700; padding:9px 12px; border-bottom:1px solid var(--border); background:var(--surface-2)}
   .sal-list button{display:flex; width:100%; gap:10px; align-items:baseline; text-align:left; border:0; border-bottom:1px solid var(--border);
@@ -130,7 +130,7 @@
   .sal-list .cd{font-weight:800; min-width:130px}
   .sal-list .nm{flex:1; color:var(--muted)}
   .sal-list .q{font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
-  @media (max-width:760px){ .sal-kpis{grid-template-columns:1fr} }
+  @media (max-width:760px){ .ord-kpis.sal-kpis{grid-template-columns:1fr} }
   .sal-kpis .sb{font-size:11.5px; color:var(--muted); margin-top:3px; font-weight:600}
   .sal-top{list-style:none; margin:10px 0 0; padding:0; font-size:13px}
   .sal-top li{display:grid; grid-template-columns:22px 1fr auto auto; gap:8px; align-items:baseline; padding:4px 0; border-top:1px dashed var(--border)}
@@ -142,7 +142,20 @@
   .sal-kpis .sal-top{font-size:12px; margin-top:8px}
   .sal-res .sal-top{max-width:560px}
   .sal-row{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap}
-  .sal-row > .l{flex:1 1 420px; min-width:0}
+  .sal-row > .l{flex:0 1 560px; min-width:0}
+  .sal-mon{flex:1 1 300px; min-width:260px; align-self:stretch; display:flex; flex-direction:column}
+  .sal-mon .t{font-size:12.5px; font-weight:800; margin-bottom:2px}
+  .sal-mon .s{font-size:11px; color:var(--muted); margin-bottom:8px}
+  .sal-bars{flex:1; min-height:170px; display:flex; align-items:flex-end; gap:2px; border-bottom:1px solid var(--border); position:relative; padding-top:18px}
+  .sal-bars .b{flex:1; position:relative; height:100%; display:flex; align-items:flex-end; cursor:default}
+  .sal-bars .b i{display:block; width:100%; max-width:34px; margin:0 auto; background:var(--accent); border-radius:4px 4px 0 0; min-height:0}
+  .sal-bars .b:hover i{filter:brightness(1.15)}
+  .sal-bars .b .v{position:absolute; left:50%; transform:translateX(-50%); font-size:10.5px; font-weight:800; color:var(--ink); white-space:nowrap; font-variant-numeric:tabular-nums}
+  .sal-bars .b .tip{display:none; position:absolute; bottom:calc(100% + 4px); left:50%; transform:translateX(-50%); background:var(--ink); color:var(--surface);
+    font-size:11px; font-weight:700; padding:4px 7px; border-radius:5px; white-space:nowrap; z-index:2; pointer-events:none}
+  .sal-bars .b:hover .tip{display:block}
+  .sal-xl{display:flex; gap:2px; margin-top:4px}
+  .sal-xl span{flex:1; text-align:center; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden}
   .sal-web{flex:0 1 auto; border-left:1px solid var(--border); padding-left:16px}
   .sal-web .cols{display:flex; gap:14px; flex-wrap:wrap}
   .sal-web .col{width:250px; max-width:100%}
@@ -2972,6 +2985,26 @@ function withPo_(rows){
     ["오늘의집","https://ohou.se/search/index?query="],
     ["구글","https://www.google.com/search?q="],
   ];
+  // 조회 기간의 월별 판매량 막대 (내부이동 제외). 기간이 길면 끝에서 24개월만.
+  function salMonthly(it, from, to){
+    const ym=n=>Math.floor(n/100), fy=Math.floor(from/10000), fm=Math.floor(from/100)%100;
+    const months=[]; let y=fy, m=fm;
+    while(y*100+m<=ym(to)){ months.push(y*100+m); m++; if(m>12){ m=1; y++; } }
+    const shown=months.slice(-24), sum={};
+    for(let i=0;i<it.d.length;i++){ const d=it.d[i]; if(d<from||d>to||it.f[i]>=2) continue; const k=ym(d); sum[k]=(sum[k]||0)+it.q[i]; }
+    const vals=shown.map(k=>Math.max(0,sum[k]||0)), max=Math.max(...vals,0);
+    if(!shown.length) return "";
+    const fmt=v=>(Math.round(v*100)/100).toLocaleString(), imax=vals.indexOf(max);
+    const step=shown.length>18?3:(shown.length>12?2:1);
+    const bars=shown.map((k,i)=>{ const h=max>0?vals[i]/max*100:0;
+      return `<div class="b"><i style="height:${h.toFixed(1)}%"></i>${i===imax&&max>0?`<span class="v" style="bottom:calc(${h.toFixed(1)}% + 2px)">${fmt(max)}</span>`:""}`
+        + `<span class="tip">${String(k).slice(0,4)}.${String(k).slice(4)} · ${fmt(vals[i])}개</span></div>`; }).join("");
+    const xl=shown.map((k,i)=>{ const mm=k%100; const lab=(i%step===0||i===shown.length-1)?(mm===1||i===0?`${String(k).slice(2,4)}.${mm}`:`${mm}월`):"";
+      return `<span>${lab}</span>`; }).join("");
+    return `<div class="sal-mon"><div class="t">월별 판매량</div>
+      <div class="s">${months.length>24?"조회 기간 중 최근 24개월 · ":""}내부이동 제외 · 막대에 마우스를 올리면 수량</div>
+      <div class="sal-bars">${bars}</div><div class="sal-xl">${xl}</div></div>`;
+  }
   function salWeb(code){
     const c=String(code||"").trim(), base=c.replace(/\.[A-Za-z]{1,4}$/,"");
     const links=q=>SAL_SHOPS.map(([n,u])=>`<a href="${esc(u+encodeURIComponent(q))}" target="_blank" rel="noopener">${n}</a>`).join("");
@@ -3012,7 +3045,7 @@ function withPo_(rows){
         <div class="big">${fmt(r.ext)}<span class="u">개</span></div>
         <div class="sub">${salYmdStr(from)} ~ ${salYmdStr(Math.min(to, today))} 판매량 · ${co} · 판매 ${r.cnt.toLocaleString()}건${r.inter?` · 그룹사 내부이동 ${fmt(r.inter)}개는 제외`:""}</div>
         ${r.ext>0?`<div class="sub" style="margin-top:10px; font-weight:700; color:var(--ink)">판매처 순위</div>${salTop(r,5)}`:""}
-      </div>${salWeb(it.c)}</div></div>
+      </div>${salMonthly(it, from, Math.min(to, today))}${salWeb(it.c)}</div></div>
       <div class="ord-kpis sal-kpis">${kp}</div>`;
   }
   // 입력한 글자가 들어간 품목코드(앞에서부터 맞는 것 먼저), 없으면 품명으로 찾는다
