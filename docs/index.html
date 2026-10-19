@@ -549,6 +549,10 @@
   .erp-setup > *:not(summary){margin-left:14px; margin-right:14px; max-width:calc(100% - 28px)}
   .erp-setup > *:last-child{margin-bottom:14px}
   .erp-sep{height:1px; background:var(--border); margin:20px 0 16px}
+  .erp-gd > summary{cursor:pointer; list-style:none}
+  .erp-gd > summary::-webkit-details-marker{display:none}
+  .erp-gd > summary::after{content:"▾"; margin-left:6px; color:var(--faint); font-size:11px}
+  .erp-gd:not([open]) > summary::after{content:"▸"}
 
   /* 토스트 */
   #toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px); opacity:0;
@@ -1206,14 +1210,14 @@ function withPo_(rows){
       <div>
         <h2>ERP 데이터</h2>
         <p>품목별 <b>재고 · 월평균 소요량 · 소진 예상</b>을 계산합니다.
-        재고 · 판매는 <b>쉐어포인트(MMS)</b>에서, BOM 은 <b>구글 드라이브</b>에서 받습니다.</p>
+        재고 · 판매 · BOM 모두 <b>쉐어포인트(MMS)</b>에서 받습니다.</p>
       </div>
       <button class="x" id="erpClose">×</button>
     </div>
     <div class="mb">
       <div class="stage"><span class="n">☁</span>쉐어포인트(MMS) 자동 연결 <span class="badge-rec">권장</span></div>
-      <p class="erp-hint">사내 로컬PC(MMS)가 <b>매시간</b> 쉐어포인트에 올리는 이카운트 <b>재고 · 판매 · 품목정보</b>를
-        받아 <b>이 화면에서 바로</b> 계산합니다. BOM 은 아래 A의 구글 드라이브 폴더 파일을 씁니다.
+      <p class="erp-hint">사내 로컬PC(MMS)가 쉐어포인트에 올리는 이카운트 <b>재고 · 판매 · 품목정보</b>(평일 매시간)와
+        <b>BOM</b>(매일 새벽 2시)을 받아 <b>이 화면에서 바로</b> 계산합니다.
         처음 한 번 연결하면 열 때마다 자동으로 최신 자료를 받습니다.</p>
       <div class="erp-auto" id="erpSpBox"></div>
       <div class="row-btns">
@@ -1222,8 +1226,9 @@ function withPo_(rows){
 
       <div class="erp-sep"></div>
 
-      <div class="stage"><span class="n">A</span>BOM 정리 (구글 드라이브)</div>
-      <p class="erp-hint">구글 드라이브 폴더의 <b>BOM 파일</b>을 매일 새벽 4시에 정리해 위 쉐어포인트 계산에 씁니다.
+      <details class="erp-gd" id="erpGdSec" open>
+      <summary class="stage"><span class="n">A</span>예비: BOM 구글 드라이브 <span style="font-weight:400;color:var(--faint)">— 쉐어포인트에 BOM 이 없을 때만 씀</span></summary>
+      <p class="erp-hint">구글 드라이브 폴더의 <b>BOM 파일</b>을 매일 새벽 4시에 정리합니다. 쉐어포인트에 BOM 이 있으면 쓰지 않습니다.
         BOM 이 바뀌면 폴더의 파일을 덮어쓰고 <b>⟳ 지금 갱신</b>을 누르세요.</p>
 
       <div class="erp-auto" id="erpAutoBox"></div>
@@ -1240,6 +1245,7 @@ function withPo_(rows){
           <li>로그에 나온 폴더에 <b>BOM 파일</b>을 넣기 — 끝!</li>
         </ol>
         <button class="btn ghost" id="erpCopyCode" style="margin-top:4px">📋 Apps Script 새 코드 복사</button>
+      </details>
       </details>
 
       <div class="erp-sep"></div>
@@ -1887,7 +1893,7 @@ function withPo_(rows){
       erpSpMsg = t ? "⚠ "+t : "로그인을 취소했습니다";
       if(interactive && t) toast("쉐어포인트 연결 실패 — "+t);
       return false;
-    }finally{ erpSpBusy=false; renderErpSp(); }
+    }finally{ erpSpBusy=false; renderErpSp(); renderErpAuto(); }
   }
   function renderErpSp(){
     const box=$("#erpSpBox"); if(!box) return;
@@ -2517,6 +2523,9 @@ function withPo_(rows){
   }
   function renderErpAuto(){
     const box=$("#erpAutoBox"); if(!box) return;
+    // 쉐어포인트 BOM 을 쓰는 중이면 구글 드라이브 BOM(예비) 칸은 접어 둔다
+    const sec=$("#erpGdSec"), spBomUsed = !!(erp && erp.src==="sp" && /쉐어포인트/.test(erp.bomNote||""));
+    if(sec && sec.dataset.auto!==String(spBomUsed)){ sec.open=!spBomUsed; sec.dataset.auto=String(spBomUsed); }
     if(!isConnected()){
       box.className="erp-auto off";
       box.innerHTML=`<div class="st"><span class="dot"></span>구글 시트 연결이 필요합니다</div>
@@ -2560,7 +2569,6 @@ function withPo_(rows){
     // ④ 정상 작동 중
     const v=String(erpAuto.bomVer||erpAuto.ver).split("|");
     box.className="erp-auto on";
-    const spBomUsed = erp && erp.src==="sp" && /쉐어포인트/.test(erp.bomNote||"");
     box.innerHTML=`<div class="st"><span class="dot"></span>BOM 정리 중 · 매일 새벽 4시</div>
       <div class="sub">마지막 정리 <b>${esc(v[0]||"–")}</b>${(erpAuto.bomVer&&v[1])?` · BOM <b>${(+v[1]).toLocaleString()}건</b>`:""}</div>
       ${spBomUsed?`<div class="sub"><b>지금은 쉐어포인트 BOM 을 쓰고 있어</b> 이 구글 드라이브 BOM 은 계산에 쓰지 않습니다.</div>`:""}
