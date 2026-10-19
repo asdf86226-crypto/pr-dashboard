@@ -121,6 +121,15 @@
   .sal-quick button{border:1px solid var(--border); background:var(--surface); color:var(--muted); font-weight:700; font-size:12px; height:28px; padding:0 10px; border-radius:7px}
   .sal-quick button:hover{color:var(--ink); border-color:var(--border-strong)}
   .sal-kpis{grid-template-columns:repeat(3,1fr)}
+  .sal-list{border:1px solid var(--border); border-radius:10px; background:var(--surface); overflow:hidden; margin-bottom:12px}
+  .sal-list .hd{font-size:12px; color:var(--muted); font-weight:700; padding:9px 12px; border-bottom:1px solid var(--border); background:var(--surface-2)}
+  .sal-list button{display:flex; width:100%; gap:10px; align-items:baseline; text-align:left; border:0; border-bottom:1px solid var(--border);
+    background:transparent; padding:8px 12px; font-size:13px; color:var(--ink); cursor:pointer}
+  .sal-list button:last-child{border-bottom:0}
+  .sal-list button:hover{background:var(--accent-soft)}
+  .sal-list .cd{font-weight:800; min-width:130px}
+  .sal-list .nm{flex:1; color:var(--muted)}
+  .sal-list .q{font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
   @media (max-width:760px){ .sal-kpis{grid-template-columns:1fr} }
   .sal-kpis .sb{font-size:11.5px; color:var(--muted); margin-top:3px; font-weight:600}
 
@@ -2924,10 +2933,16 @@ function withPo_(rows){
     if(!salIdx){ out.innerHTML=`<div class="ord-note">판매현황을 아직 받지 못했습니다.</div>`; return; }
     const from=salYmd($("#salFrom").value)||19000101, to=salYmd($("#salTo").value)||99991231;
     if(from>to){ out.innerHTML=`<div class="ord-note">시작일이 종료일보다 늦습니다.</div>`; return; }
-    const it=salIdx[erpKey(code)];
-    const hit=erpFind(code), name=(it && it.n) || (hit && hit.it.n) || "";
+    let it=salIdx[erpKey(code)];
+    if(!it){
+      // 품목코드를 다 치지 않았으면 비슷한 코드를 찾아 고르게 한다 (하나뿐이면 바로 그 품목)
+      const c=salCandidates(code);
+      if(c.length===1){ it=c[0]; $("#salCode").value=it.c; }
+      else if(c.length){ salPick(c, code); return; }
+    }
+    const hit=erpFind(it ? it.c : code), name=(it && it.n) || (hit && hit.it.n) || "";
     if(!it){ out.innerHTML=`<div class="sal-res"><div class="it"><b>${esc(code)}</b>${name?" · "+esc(name):""}</div>
-      <div class="sub">2022년 이후 판매 기록이 없습니다. 품목코드를 끝자리까지 확인해 주세요 (717062.0 과 717062 는 다른 품목).</div></div>`; return; }
+      <div class="sub">2022년 이후 판매 기록에서 이 글자가 들어간 품목코드·품명을 찾지 못했습니다.</div></div>`; return; }
     const r=salSum(it, from, to), today=salYmd(todayISO());
     const fmt=v=>(Math.round(v*100)/100).toLocaleString();
     const co=MmsSp.COMPANIES.map((c,i)=>c+" "+fmt(r.co[i])).join(" · ");
@@ -2941,6 +2956,25 @@ function withPo_(rows){
         <div class="sub">${salYmdStr(from)} ~ ${salYmdStr(Math.min(to, today))} 판매량 · ${co} · 판매 ${r.cnt.toLocaleString()}건${r.inter?` · 그룹사 내부이동 ${fmt(r.inter)}개는 제외`:""}</div>
       </div>
       <div class="ord-kpis sal-kpis">${kp}</div>`;
+  }
+  // 입력한 글자가 들어간 품목코드(앞에서부터 맞는 것 먼저), 없으면 품명으로 찾는다
+  function salCandidates(q){
+    const k=erpKey(q); if(!k || !salIdx) return [];
+    const all=Object.keys(salIdx);
+    let hit=all.filter(c=>c.includes(k));
+    if(!hit.length){ const t=q.trim().toLowerCase(); hit=all.filter(c=>(salIdx[c].n||"").toLowerCase().includes(t)); }
+    const a12=salRecent(12), today=salYmd(todayISO());
+    return hit.map(c=>salIdx[c])
+      .map(it=>({it, pre:erpKey(it.c).startsWith(k)?0:1, q:salSum(it,a12,today).ext}))
+      .sort((x,y)=>x.pre-y.pre || y.q-x.q || x.it.c.localeCompare(y.it.c))
+      .map(x=>Object.assign(x.it,{_q12:x.q}));
+  }
+  function salPick(list, q){
+    const max=30, fmt=v=>(Math.round(v*100)/100).toLocaleString();
+    $("#salOut").innerHTML=`<div class="sal-list"><div class="hd">'${esc(q)}' 이(가) 들어간 품목 ${list.length.toLocaleString()}개${list.length>max?` — 앞에서부터 맞는 것 · 최근 판매 많은 순으로 ${max}개만`:""} · 눌러서 고르세요</div>`
+      + list.slice(0,max).map(it=>`<button type="button" data-c="${esc(it.c)}"><span class="cd">${esc(it.c)}</span><span class="nm">${esc(it.n||"")}</span><span class="q">최근 12개월 ${fmt(it._q12||0)}개</span></button>`).join("")
+      + `</div>`;
+    $("#salOut").querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ $("#salCode").value=b.dataset.c; salShow(); });
   }
   $("#salGo").onclick=async()=>{ if(!salIdx) await salEnsure(false); salShow(); };
   ["salCode","salFrom","salTo"].forEach(id=>$("#"+id).addEventListener("keydown", e=>{ if(e.key==="Enter") $("#salGo").click(); }));
