@@ -1233,7 +1233,7 @@ function withPo_(rows){
     </div>
     <div class="sal-quick" id="salQuick">
       <button type="button" data-q="m0">이번 달</button><button type="button" data-q="m1">지난달</button>
-      <button type="button" data-q="r3">최근 3개월</button><button type="button" data-q="y0">올해</button><button type="button" data-q="y1">작년</button>
+      <button type="button" data-q="y0">올해</button><button type="button" data-q="y1">작년</button>
     </div>
     <div id="salOut"></div>
   </div>
@@ -3010,7 +3010,6 @@ function withPo_(rows){
     let a, z=new Date(d);
     if(b.dataset.q==="m0") a=new Date(y,mo,1);
     if(b.dataset.q==="m1"){ a=new Date(y,mo-1,1); z=new Date(y,mo,0); }
-    if(b.dataset.q==="r3") a=new Date(y,mo-2,1);
     if(b.dataset.q==="y0") a=new Date(y,0,1);
     if(b.dataset.q==="y1"){ a=new Date(y-1,0,1); z=new Date(y-1,11,31); }
     $("#salFrom").value=iso(a); $("#salTo").value=iso(z);
