@@ -110,6 +110,20 @@
               padding:1px 6px; border-radius:999px; font-variant-numeric:tabular-nums}
   @media (max-width:700px){ .ptabs{margin:12px 14px 0} }
 
+  /* ---------- 판매 조회 ---------- */
+  .sal-res{border:1px solid var(--border); border-radius:10px; padding:14px 16px; background:var(--surface); margin-bottom:12px}
+  .sal-res .it{font-size:13px; color:var(--muted); font-weight:700}
+  .sal-res .it b{color:var(--ink); font-size:15px}
+  .sal-res .big{font-size:30px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:6px}
+  .sal-res .big .u{font-size:14px; font-weight:700; color:var(--muted); margin-left:4px}
+  .sal-res .sub{font-size:12px; color:var(--muted); margin-top:4px; line-height:1.6}
+  .sal-quick{display:flex; gap:6px; flex-wrap:wrap; margin:-4px 0 12px}
+  .sal-quick button{border:1px solid var(--border); background:var(--surface); color:var(--muted); font-weight:700; font-size:12px; height:28px; padding:0 10px; border-radius:7px}
+  .sal-quick button:hover{color:var(--ink); border-color:var(--border-strong)}
+  .sal-kpis{grid-template-columns:repeat(3,1fr)}
+  @media (max-width:760px){ .sal-kpis{grid-template-columns:1fr} }
+  .sal-kpis .sb{font-size:11.5px; color:var(--muted); margin-top:3px; font-weight:600}
+
   /* ---------- 발주 필요 ---------- */
   .ord{margin:16px 24px 40px}
   @media (max-width:700px){ .ord{margin:14px 14px 32px} }
@@ -586,6 +600,7 @@
 <div class="ptabs">
   <button class="ptab on" data-page="req">📋 구매요청</button>
   <button class="ptab" data-page="order">🧾 발주 필요 <span class="ptab-badge" id="ordBadge" hidden>0</span></button>
+  <button class="ptab" data-page="sales">📈 판매 조회</button>
 </div>
 
 <div id="pageReq">
@@ -1187,6 +1202,24 @@ function withPo_(rows){
   </section>
 </main>
 </div><!-- /pageReq -->
+
+<section class="ord" id="pageSales" hidden>
+  <div class="card" style="padding:16px 18px">
+    <h2 style="font-size:16px; font-weight:800; margin:0 0 4px">판매 조회</h2>
+    <p class="ord-note" id="salNote">쉐어포인트(MMS)의 두 회사 판매현황으로 계산합니다.</p>
+    <div class="ord-ctl">
+      <div class="f"><label>품목코드</label><input id="salCode" type="text" placeholder="예: 717062" style="width:170px" autocomplete="off"></div>
+      <div class="f"><label>시작일</label><input id="salFrom" type="date"></div>
+      <div class="f"><label>종료일</label><input id="salTo" type="date"></div>
+      <div class="f"><label>&nbsp;</label><button class="btn" id="salGo" type="button" style="height:32px; padding:0 18px">조회</button></div>
+    </div>
+    <div class="sal-quick" id="salQuick">
+      <button type="button" data-q="m0">이번 달</button><button type="button" data-q="m1">지난달</button>
+      <button type="button" data-q="r3">최근 3개월</button><button type="button" data-q="y0">올해</button><button type="button" data-q="y1">작년</button>
+    </div>
+    <div id="salOut"></div>
+  </div>
+</section>
 
 <section class="ord" id="pageOrder" hidden>
   <div class="card" style="padding:16px 18px">
@@ -2750,8 +2783,10 @@ function withPo_(rows){
 
   function showPage(which){
     ordPage = (which==="order");
-    $("#pageReq").hidden = ordPage;
+    $("#pageReq").hidden = which!=="req";
     $("#pageOrder").hidden = !ordPage;
+    $("#pageSales").hidden = which!=="sales";
+    if(which==="sales") salOpen();
     document.querySelectorAll(".ptab").forEach(t=>t.classList.toggle("on", t.dataset.page===which));
     if(ordPage){
       const w=$("#ordWho"); if(w && !w.value) w.value=loadRequester();
@@ -2760,6 +2795,168 @@ function withPo_(rows){
     }
   }
   document.querySelectorAll(".ptab").forEach(t=>t.onclick=()=>showPage(t.dataset.page));
+
+  /* ---------- 판매 조회 ----------
+   * 쉐어포인트 MMS/<회사>/판매현황_전체 (2022년~) 두 파일을 받아 품목코드별 [일자, 수량] 목록으로 만들어
+   * 이 브라우저(IndexedDB)에 둔다. 파일이 그대로면(eTag 같으면) 다시 받지 않는다.
+   * 판매량은 그룹사(태성정밀↔플로우텍) 내부이동을 뺀 값 — ERP 월평균 소요량과 같은 기준. 내부이동은 따로 보여준다.
+   * '최근 N개월'은 ERP 계산과 같게 이번 달을 포함한 N개 달의 1일부터 오늘까지. */
+  const SAL_REPORT="판매현황_전체";
+  let salIdx=null, salMeta=null, salBusy=null;
+  let salDbP=null;
+  function salDb(){
+    if(!salDbP) salDbP=new Promise((res,rej)=>{ const r=indexedDB.open("pr_sales",1);
+      r.onupgradeneeded=()=>r.result.createObjectStore("kv"); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+    return salDbP;
+  }
+  async function salKv(mode, fn){
+    const db=await salDb();
+    return new Promise((res,rej)=>{ const t=db.transaction("kv",mode), q=fn(t.objectStore("kv"));
+      t.oncomplete=()=>res(q && q.result); t.onerror=()=>rej(t.error); });
+  }
+  // 일자 → 20251103 같은 숫자. 2025-11-03 · 2025/11/03 · 20251103 · 20251103-17(전표번호) · 엑셀 일련번호
+  function salYmd(v){
+    const s=erpNorm(v).replace(/[./]/g,"-");
+    let m=s.match(/^(\d{4})(\d{2})(\d{2})(?:[^\d].*)?$/) || s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if(m && +m[2]>=1 && +m[2]<=12) return (+m[1])*10000+(+m[2])*100+(+m[3]);
+    const n=parseFloat(s);
+    if(n>20000 && n<80000){ const d=new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000);
+      return d.getUTCFullYear()*10000+(d.getUTCMonth()+1)*100+d.getUTCDate(); }
+    return 0;
+  }
+  function salYmdStr(n){ const s=String(n); return s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8); }
+  function salParse(rows, ci, idx){
+    const hi=erpHeaderAt(rows,["품목코드","수량"]); if(hi<0) throw new Error("판매현황에서 품목코드·수량 열을 찾지 못했습니다");
+    const m=erpCols(rows,hi);
+    const cC=m["품목코드"], cQ=m["수량"],
+          cN=erpCol(m,["품목명","품명","품목명(규격)","품목명[규격]"]),
+          cV=erpCol(m,["거래처명","거래처","판매처명","판매처"]),
+          cD=erpCol(m,["일자","일 자","날짜","판매일자","매출일자","출고일자","전표일자"]) ?? erpColLike(m,["일자","날짜"]);
+    if(cD==null) throw new Error("판매현황에 일자 열이 없습니다");
+    let n=0;
+    for(let i=hi+1;i<rows.length;i++){
+      const r=rows[i]||[]; const code=erpNorm(r[cC]); if(!code || /^합\s*계$/.test(code)) continue;
+      const q=erpNum(r[cQ]); if(!q) continue;
+      const d=salYmd(r[cD]); if(!d) continue;
+      const k=erpKey(code), it=idx[k] || (idx[k]={c:code, n:"", d:[], q:[], f:[]});
+      if(!it.n && cN!=null) it.n=erpNorm(r[cN]);
+      const inter = cV!=null && GROUPCO.indexOf(erpCo(r[cV]))>=0;
+      it.d.push(d); it.q.push(q); it.f.push(ci + (inter?2:0));
+      n++;
+    }
+    return n;
+  }
+  async function salLoad(interactive){
+    if(!window.MmsSp) throw new Error("이 파일에서는 쉐어포인트에 연결할 수 없습니다");
+    if(!salIdx){ try{ const c=await salKv("readonly", st=>st.get("idx")); if(c){ salIdx=c.idx; salMeta=c.meta; } }catch(e){} }
+    if(interactive) await MmsSp.token(true);
+    const metas=[];
+    for(const co of MmsSp.COMPANIES){
+      const path=MmsSp.reportPath(co, SAL_REPORT);
+      try{ metas.push({co, path, meta: await MmsSp.meta(path, false)}); }
+      catch(e){ if(e.status===404) continue; throw e; }
+    }
+    if(!metas.length) throw new Error("쉐어포인트 MMS 폴더에서 판매현황 파일을 찾지 못했습니다");
+    const sig=metas.map(m=>m.meta.eTag).join("|");
+    if(salIdx && salMeta && salMeta.sig===sig) return false;
+    const idx={}, at={};
+    for(const m of metas){
+      const got=await MmsSp.download(m.path, false);
+      const rows=await erpFileRows(new File([got.bytes], m.co+"_"+SAL_REPORT+".xlsx"));
+      salParse(rows, MmsSp.COMPANIES.indexOf(m.co), idx);
+      at[m.co]=m.meta.lastModifiedDateTime;
+    }
+    salIdx=idx; salMeta={sig, at, n:Object.keys(idx).length};
+    try{ await salKv("readwrite", st=>st.put({idx, meta:salMeta}, "idx")); }catch(e){ console.warn("[판매 조회] 저장 실패", e); }
+    return true;
+  }
+  function salNoteText(){
+    if(!salMeta) return "쉐어포인트(MMS)의 두 회사 판매현황으로 계산합니다.";
+    const p2=n=>String(n).padStart(2,"0");
+    const t=Object.keys(salMeta.at||{}).map(co=>{ const d=new Date(salMeta.at[co]);
+      return co+" "+p2(d.getMonth()+1)+"/"+p2(d.getDate())+" "+p2(d.getHours())+":"+p2(d.getMinutes()); }).join(" · ");
+    return "쉐어포인트 판매현황 기준 — "+t+" · 판매량은 그룹사(태성정밀↔플로우텍) 내부이동을 뺀 값입니다.";
+  }
+  async function salOpen(){
+    const f=$("#salFrom"), t=$("#salTo");
+    if(!t.value) t.value=todayISO();
+    if(!f.value) f.value=todayISO().slice(0,4)+"-01-01";
+    await salEnsure(false);
+  }
+  async function salEnsure(interactive){
+    if(salBusy) return salBusy;
+    salBusy=(async()=>{
+      $("#salNote").textContent="판매현황을 확인하는 중…";
+      try{
+        await salLoad(interactive);
+        $("#salNote").textContent=salNoteText();
+        if($("#salCode").value.trim()) salShow();
+        return true;
+      }catch(e){
+        const msg=(window.MmsSp && MmsSp.errorText(e)) || String(e && e.message || e);
+        if(salIdx){ $("#salNote").textContent=salNoteText()+" (최신 확인 실패: "+msg+")"; return true; }
+        $("#salNote").innerHTML=esc(e && e.needLogin ? "쉐어포인트 로그인이 필요합니다." : msg)
+          +' <button class="linkbtn" id="salLogin" type="button">☁ 쉐어포인트 연결</button>';
+        const b=$("#salLogin"); if(b) b.onclick=()=>salEnsure(true);
+        return false;
+      }finally{ salBusy=null; }
+    })();
+    return salBusy;
+  }
+  function salSum(it, from, to){
+    const r={ext:0, inter:0, co:[0,0], cnt:0};
+    if(!it) return r;
+    for(let i=0;i<it.d.length;i++){
+      const d=it.d[i]; if(d<from || d>to) continue;
+      const q=it.q[i], f=it.f[i];
+      if(f>=2){ r.inter+=q; continue; }
+      r.ext+=q; r.co[f]+=q; r.cnt++;
+    }
+    return r;
+  }
+  function salRecent(n){
+    const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-(n-1));
+    return d.getFullYear()*10000+(d.getMonth()+1)*100+1;
+  }
+  function salShow(){
+    const out=$("#salOut"), code=$("#salCode").value.trim();
+    if(!code){ out.innerHTML=""; return; }
+    if(!salIdx){ out.innerHTML=`<div class="ord-note">판매현황을 아직 받지 못했습니다.</div>`; return; }
+    const from=salYmd($("#salFrom").value)||19000101, to=salYmd($("#salTo").value)||99991231;
+    if(from>to){ out.innerHTML=`<div class="ord-note">시작일이 종료일보다 늦습니다.</div>`; return; }
+    const it=salIdx[erpKey(code)];
+    const hit=erpFind(code), name=(it && it.n) || (hit && hit.it.n) || "";
+    if(!it){ out.innerHTML=`<div class="sal-res"><div class="it"><b>${esc(code)}</b>${name?" · "+esc(name):""}</div>
+      <div class="sub">2022년 이후 판매 기록이 없습니다. 품목코드를 끝자리까지 확인해 주세요 (717062.0 과 717062 는 다른 품목).</div></div>`; return; }
+    const r=salSum(it, from, to), today=salYmd(todayISO());
+    const fmt=v=>(Math.round(v*100)/100).toLocaleString();
+    const co=MmsSp.COMPANIES.map((c,i)=>c+" "+fmt(r.co[i])).join(" · ");
+    const kp=[12,6,3].map(n=>{ const a=salRecent(n), s=salSum(it, a, today);
+      return `<div class="ord-kpi"><div class="lb">최근 ${n}개월 <span style="font-weight:600">(${salYmdStr(a).slice(0,7)} ~ 오늘)</span></div>
+        <div class="vl">${fmt(s.ext)}<span class="u">개</span></div>
+        <div class="sb">월평균 ${fmt(s.ext/n)}${s.inter?` · 내부이동 ${fmt(s.inter)} 별도`:""}</div></div>`; }).join("");
+    out.innerHTML=`<div class="sal-res">
+        <div class="it"><b>${esc(it.c)}</b>${name?" · "+esc(name):""}</div>
+        <div class="big">${fmt(r.ext)}<span class="u">개</span></div>
+        <div class="sub">${salYmdStr(from)} ~ ${salYmdStr(Math.min(to, today))} 판매량 · ${co} · 판매 ${r.cnt.toLocaleString()}건${r.inter?` · 그룹사 내부이동 ${fmt(r.inter)}개는 제외`:""}</div>
+      </div>
+      <div class="ord-kpis sal-kpis">${kp}</div>`;
+  }
+  $("#salGo").onclick=async()=>{ if(!salIdx) await salEnsure(false); salShow(); };
+  ["salCode","salFrom","salTo"].forEach(id=>$("#"+id).addEventListener("keydown", e=>{ if(e.key==="Enter") $("#salGo").click(); }));
+  $("#salQuick").onclick=e=>{
+    const b=e.target.closest("[data-q]"); if(!b) return;
+    const d=new Date(), y=d.getFullYear(), mo=d.getMonth(), p2=n=>String(n).padStart(2,"0");
+    const iso=x=>x.getFullYear()+"-"+p2(x.getMonth()+1)+"-"+p2(x.getDate());
+    let a, z=new Date(d);
+    if(b.dataset.q==="m0") a=new Date(y,mo,1);
+    if(b.dataset.q==="m1"){ a=new Date(y,mo-1,1); z=new Date(y,mo,0); }
+    if(b.dataset.q==="r3") a=new Date(y,mo-2,1);
+    if(b.dataset.q==="y0") a=new Date(y,0,1);
+    if(b.dataset.q==="y1"){ a=new Date(y-1,0,1); z=new Date(y-1,11,31); }
+    $("#salFrom").value=iso(a); $("#salTo").value=iso(z);
+    salShow();
+  };
   ["ordRisk","ordKind","ordRed","ordAmber","ordNeed","ordSearch"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("input", renderOrder);
   });
