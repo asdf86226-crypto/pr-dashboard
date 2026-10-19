@@ -152,20 +152,6 @@
     color:var(--ink); text-decoration:none; background:var(--surface-2)}
   .sal-web a:hover{border-color:var(--accent); color:var(--accent)}
   .sal-web .q2{margin-top:10px}
-  .sal-nv{margin-bottom:12px}
-  .sal-nv .hd{display:flex; justify-content:space-between; gap:8px; align-items:baseline; font-size:12.5px; font-weight:800; margin-bottom:6px}
-  .sal-nv .hd .at{font-size:11px; color:var(--muted); font-weight:600; white-space:nowrap}
-  .sal-nv ol{list-style:none; margin:0; padding:0; max-height:300px; overflow:auto; border:1px solid var(--border); border-radius:8px}
-  .sal-nv li{border-bottom:1px solid var(--border)}
-  .sal-nv li:last-child{border-bottom:0}
-  .sal-nv li a{display:grid; grid-template-columns:1fr auto; gap:2px 8px; padding:7px 10px; text-decoration:none; color:var(--ink);
-    border:0; border-radius:0; background:transparent; text-align:left; font-weight:600}
-  .sal-nv li a:hover{background:var(--accent-soft); color:var(--ink)}
-  .sal-nv .m{font-size:12.5px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .sal-nv .p{font-size:12.5px; font-weight:800; font-variant-numeric:tabular-nums; text-align:right}
-  .sal-nv .tt{grid-column:1/-1; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .sal-nv .none{font-size:12px; color:var(--muted); line-height:1.5}
-  .sal-nv .low{color:var(--risk-1)}
 
   /* ---------- 발주 필요 ---------- */
   .ord{margin:16px 24px 40px}
@@ -2847,7 +2833,6 @@ function withPo_(rows){
   const SAL_REPORT="판매현황_전체";
   const SAL_VER=2;   // 저장 형식 — 바뀌면 파일이 그대로여도 다시 받는다 (2: 판매처 추가)
   let salIdx=null, salMeta=null, salBusy=null;
-  let salNaver=null;   // 로컬PC(MMS)가 하루 1번 올리는 네이버쇼핑 판매처 (온라인판매/네이버쇼핑_최신.json)
   let salDbP=null;
   function salDb(){
     if(!salDbP) salDbP=new Promise((res,rej)=>{ const r=indexedDB.open("pr_sales",1);
@@ -2920,18 +2905,6 @@ function withPo_(rows){
     try{ await salKv("readwrite", st=>st.put({idx, meta:salMeta}, "idx")); }catch(e){ console.warn("[판매 조회] 저장 실패", e); }
     return true;
   }
-  async function salNaverLoad(){
-    try{
-      if(!salNaver){ const c=await salKv("readonly", st=>st.get("naver")); if(c) salNaver=c; }
-      const got=await MmsSp.download("온라인판매/네이버쇼핑_최신.json", false, salNaver && salNaver.etag);
-      if(!got.bytes) return;
-      salNaver={etag:got.meta.eTag, data:JSON.parse(new TextDecoder().decode(got.bytes))};
-      try{ await salKv("readwrite", st=>st.put(salNaver, "naver")); }catch(e){}
-    }catch(e){
-      if(e && e.status===404) return;   // 아직 한 번도 안 돌았거나 네이버 키가 없음
-      console.warn("[판매 조회] 네이버쇼핑 판매처를 받지 못했습니다", e);
-    }
-  }
   function salNoteText(){
     if(!salMeta) return "쉐어포인트(MMS)의 두 회사 판매현황으로 계산합니다.";
     const p2=n=>String(n).padStart(2,"0");
@@ -2951,7 +2924,6 @@ function withPo_(rows){
       $("#salNote").textContent="판매현황을 확인하는 중…";
       try{
         await salLoad(interactive);
-        await salNaverLoad();
         $("#salNote").textContent=salNoteText();
         if($("#salCode").value.trim()) salShow();
         return true;
@@ -2998,22 +2970,10 @@ function withPo_(rows){
     ["오늘의집","https://ohou.se/search/index?query="],
     ["구글","https://www.google.com/search?q="],
   ];
-  function salNaverBox(code){
-    const d=salNaver && salNaver.data; if(!d) return "";
-    const it=(d.items||{})[code], at=String(d.at||"").replace("T"," ").slice(5,16);
-    if(!it) return `<div class="sal-nv"><div class="hd">네이버쇼핑 판매처<span class="at">${esc(at)} 기준</span></div>
-      <div class="none">상품명에 이 품번이 들어간 네이버쇼핑 상품을 찾지 못했습니다${d.codes?" (최근 12개월 판매된 제품·상품만 매일 찾습니다)":""}.</div></div>`;
-    const won=v=>v>0?"₩"+v.toLocaleString():"-";
-    const rows=(it.shops||[]).map(x=>`<li><a href="${esc(x.link)}" target="_blank" rel="noopener" title="${esc(x.title)}">
-        <span class="m">${esc(x.mall||"-")}</span><span class="p${x.price>0&&x.price===it.min?" low":""}">${won(x.price)}</span>
-        <span class="tt">${esc(x.title)}</span></a></li>`).join("");
-    return `<div class="sal-nv"><div class="hd">네이버쇼핑 판매처 ${it.n.toLocaleString()}개 · 최저가 ${won(it.min)}<span class="at">${esc(at)} 기준</span></div>
-      <ol>${rows}</ol>${it.n>(it.shops||[]).length?`<div class="none" style="margin-top:4px">가격 낮은 ${it.shops.length}곳만 표시</div>`:""}</div>`;
-  }
   function salWeb(code){
     const c=String(code||"").trim(), base=c.replace(/\.[A-Za-z]{1,4}$/,"");
     const links=q=>SAL_SHOPS.map(([n,u])=>`<a href="${esc(u+encodeURIComponent(q))}" target="_blank" rel="noopener">${n}</a>`).join("");
-    return `<div class="sal-web">${salNaverBox(c)}<div class="t">🛒 온라인 판매처 찾기</div>
+    return `<div class="sal-web"><div class="t">🛒 온라인 판매처 찾기</div>
       <div class="d">누르면 그 쇼핑몰에서 <b>${esc(c)}</b> 검색 결과가 새 창으로 열립니다.</div>
       <div class="g">${links(c)}</div>
       ${base!==c?`<div class="d q2">색상 표기를 뺀 <b>${esc(base)}</b> 로 찾기</div><div class="g">${links(base)}</div>`:""}
