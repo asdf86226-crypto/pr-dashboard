@@ -168,6 +168,8 @@
   .sal-web a{display:block; text-align:center; padding:7px 6px; border:1px solid var(--border); border-radius:7px; font-size:12.5px; font-weight:700;
     color:var(--ink); text-decoration:none; background:var(--surface-2)}
   .sal-web a:hover{border-color:var(--accent); color:var(--accent)}
+  .sal-web a{display:flex; align-items:center; justify-content:center; gap:6px}
+  .sal-web a img{width:16px; height:16px; border-radius:3px; flex:none}
   .sal-web .d b{white-space:nowrap}
 
   /* ---------- 발주 필요 ---------- */
@@ -2978,14 +2980,14 @@ function withPo_(rows){
   // 온라인에서 이 품번을 파는 곳 찾기 — 쇼핑몰 사이트 내용은 브라우저가 직접 읽을 수 없어(보안 정책) 검색 결과 링크로 연다.
   // 색상 꼬리(.BN · .CP 등)를 뺀 품번으로 올린 판매처도 많아 그 검색도 같이 둔다.
   const SAL_SHOPS=[
-    ["네이버쇼핑","https://search.shopping.naver.com/search/all?query="],
-    ["쿠팡","https://www.coupang.com/np/search?q="],
-    ["11번가","https://search.11st.co.kr/Search.tmall?kwd="],
-    ["G마켓","https://browse.gmarket.co.kr/search?keyword="],
-    ["옥션","https://browse.auction.co.kr/search?keyword="],
-    ["다나와","https://search.danawa.com/dsearch.php?query="],
-    ["오늘의집","https://ohou.se/search/index?query="],
-    ["구글","https://www.google.com/search?q="],
+    ["네이버쇼핑","https://search.shopping.naver.com/search/all?query=","shopping.naver.com"],
+    ["쿠팡","https://www.coupang.com/np/search?q=","coupang.com"],
+    ["11번가","https://search.11st.co.kr/Search.tmall?kwd=","11st.co.kr"],
+    ["G마켓","https://browse.gmarket.co.kr/search?keyword=","gmarket.co.kr"],
+    ["옥션","https://browse.auction.co.kr/search?keyword=","auction.co.kr"],
+    ["다나와","https://search.danawa.com/dsearch.php?query=","danawa.com"],
+    ["오늘의집","https://ohou.se/search/index?query=","ohou.se"],
+    ["구글","https://www.google.com/search?q=","google.com"],
   ];
   // 조회 기간의 월별 판매량 막대 (내부이동 제외). 기간이 길면 끝에서 24개월만.
   function salMonthly(it, from, to){
@@ -3009,7 +3011,9 @@ function withPo_(rows){
   }
   function salWeb(code){
     const c=String(code||"").trim(), base=c.replace(/\.[A-Za-z]{1,4}$/,"");
-    const links=q=>SAL_SHOPS.map(([n,u])=>`<a href="${esc(u+encodeURIComponent(q))}" target="_blank" rel="noopener">${n}</a>`).join("");
+    // 로고는 각 사이트의 파비콘(구글 파비콘 서비스). 못 불러오면 그림만 숨기고 글자는 그대로
+    const links=q=>SAL_SHOPS.map(([n,u,dom])=>`<a href="${esc(u+encodeURIComponent(q))}" target="_blank" rel="noopener">`
+      + `<img src="https://www.google.com/s2/favicons?domain=${dom}&sz=32" alt="" width="16" height="16" loading="lazy" onerror="this.remove()">${n}</a>`).join("");
     const col=(label,q)=>`<div class="col"><div class="d">${label} <b>${esc(q)}</b></div><div class="g">${links(q)}</div></div>`;
     return `<div class="sal-web"><div class="t">🛒 온라인 판매처 찾기 <span style="font-weight:600; color:var(--muted); font-size:11.5px">— 누르면 그 쇼핑몰 검색 결과가 새 창으로 열립니다</span></div>
       <div class="cols">${col("품번 그대로", c)}${base!==c?col("색상 표기 뺀", base):""}</div>
