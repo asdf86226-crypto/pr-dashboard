@@ -141,6 +141,17 @@
   .sal-top .pc{color:var(--muted); font-size:11.5px; font-variant-numeric:tabular-nums; min-width:38px; text-align:right}
   .sal-kpis .sal-top{font-size:12px; margin-top:8px}
   .sal-res .sal-top{max-width:560px}
+  .sal-row{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap}
+  .sal-row > .l{flex:1 1 420px; min-width:0}
+  .sal-web{flex:0 1 340px; border-left:1px solid var(--border); padding-left:16px}
+  @media (max-width:900px){ .sal-web{border-left:0; padding-left:0; border-top:1px solid var(--border); padding-top:12px; flex-basis:100%} }
+  .sal-web .t{font-size:12.5px; font-weight:800; margin-bottom:4px}
+  .sal-web .d{font-size:11.5px; color:var(--muted); margin-bottom:8px; line-height:1.5}
+  .sal-web .g{display:grid; grid-template-columns:repeat(2,1fr); gap:6px}
+  .sal-web a{display:block; text-align:center; padding:7px 6px; border:1px solid var(--border); border-radius:7px; font-size:12.5px; font-weight:700;
+    color:var(--ink); text-decoration:none; background:var(--surface-2)}
+  .sal-web a:hover{border-color:var(--accent); color:var(--accent)}
+  .sal-web .q2{margin-top:10px}
 
   /* ---------- 발주 필요 ---------- */
   .ord{margin:16px 24px 40px}
@@ -2947,6 +2958,27 @@ function withPo_(rows){
     return `<ol class="sal-top">${list.map((x,i)=>`<li><span class="rk">${i+1}</span><span class="nm" title="${esc(x.v)}">${esc(x.v)}</span>`
       + `<span class="q">${fmt(x.q)}</span><span class="pc">${r.ext>0?Math.round(x.q/r.ext*100)+"%":""}</span></li>`).join("")}</ol>`;
   }
+  // 온라인에서 이 품번을 파는 곳 찾기 — 쇼핑몰 사이트 내용은 브라우저가 직접 읽을 수 없어(보안 정책) 검색 결과 링크로 연다.
+  // 색상 꼬리(.BN · .CP 등)를 뺀 품번으로 올린 판매처도 많아 그 검색도 같이 둔다.
+  const SAL_SHOPS=[
+    ["네이버쇼핑","https://search.shopping.naver.com/search/all?query="],
+    ["쿠팡","https://www.coupang.com/np/search?q="],
+    ["11번가","https://search.11st.co.kr/Search.tmall?kwd="],
+    ["G마켓","https://browse.gmarket.co.kr/search?keyword="],
+    ["옥션","https://browse.auction.co.kr/search?keyword="],
+    ["다나와","https://search.danawa.com/dsearch.php?query="],
+    ["오늘의집","https://ohou.se/search/index?query="],
+    ["구글","https://www.google.com/search?q="],
+  ];
+  function salWeb(code){
+    const c=String(code||"").trim(), base=c.replace(/\.[A-Za-z]{1,4}$/,"");
+    const links=q=>SAL_SHOPS.map(([n,u])=>`<a href="${esc(u+encodeURIComponent(q))}" target="_blank" rel="noopener">${n}</a>`).join("");
+    return `<div class="sal-web"><div class="t">🛒 온라인 판매처 찾기</div>
+      <div class="d">누르면 그 쇼핑몰에서 <b>${esc(c)}</b> 검색 결과가 새 창으로 열립니다.</div>
+      <div class="g">${links(c)}</div>
+      ${base!==c?`<div class="d q2">색상 표기를 뺀 <b>${esc(base)}</b> 로 찾기</div><div class="g">${links(base)}</div>`:""}
+    </div>`;
+  }
   function salRecent(n){
     const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-(n-1));
     return d.getFullYear()*10000+(d.getMonth()+1)*100+1;
@@ -2974,12 +3006,12 @@ function withPo_(rows){
       return `<div class="ord-kpi"><div class="lb">최근 ${n}개월 <span style="font-weight:600">(${salYmdStr(a).slice(0,7)} ~ 오늘)</span></div>
         <div class="vl">${fmt(s.ext)}<span class="u">개</span></div>
         <div class="sb">월평균 ${fmt(s.ext/n)}${s.inter?` · 내부이동 ${fmt(s.inter)} 별도`:""}</div>${salTop(s,3)}</div>`; }).join("");
-    out.innerHTML=`<div class="sal-res">
+    out.innerHTML=`<div class="sal-res"><div class="sal-row"><div class="l">
         <div class="it"><b>${esc(it.c)}</b>${name?" · "+esc(name):""}</div>
         <div class="big">${fmt(r.ext)}<span class="u">개</span></div>
         <div class="sub">${salYmdStr(from)} ~ ${salYmdStr(Math.min(to, today))} 판매량 · ${co} · 판매 ${r.cnt.toLocaleString()}건${r.inter?` · 그룹사 내부이동 ${fmt(r.inter)}개는 제외`:""}</div>
         ${r.ext>0?`<div class="sub" style="margin-top:10px; font-weight:700; color:var(--ink)">판매처 순위</div>${salTop(r,5)}`:""}
-      </div>
+      </div>${salWeb(it.c)}</div></div>
       <div class="ord-kpis sal-kpis">${kp}</div>`;
   }
   // 입력한 글자가 들어간 품목코드(앞에서부터 맞는 것 먼저), 없으면 품명으로 찾는다
