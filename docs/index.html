@@ -1604,6 +1604,12 @@ function withPo_(rows){
       return false;
     }finally{ erpSpBusy=false; renderErpSp(); }
   }
+  // 이번에 다시 계산하지 않았어도(파일 그대로) 지금 쓰는 자료가 무엇인지 보이게 한다
+  function erpSpSummary(){
+    if(!(erp && erp.src==="sp")) return "열 때마다 바뀐 파일이 있으면 다시 계산합니다.";
+    return `재고 ${erp.stockAt||"–"} 기준 · 품목 ${(erp.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${erp.bomNote||"BOM 없음"}`
+      +" — 바뀐 파일이 있으면 열 때 다시 계산합니다.";
+  }
   function renderErpSp(){
     const box=$("#erpSpBox"); if(!box) return;
     const on=erpSpOn();
@@ -1611,7 +1617,7 @@ function withPo_(rows){
     box.innerHTML = !window.MmsSp
       ? `<div class="st"><span class="dot"></span>이 파일에서는 쓸 수 없습니다</div><div class="sub">인터넷 주소로 연 대시보드에서만 쉐어포인트에 연결됩니다.</div>`
       : `<div class="st"><span class="dot"></span>${erpSpBusy ? "쉐어포인트에서 받아 계산하는 중…" : (on ? "쉐어포인트(MMS) 연결됨" : "연결 안 됨")}</div>
-         <div class="sub">${esc(erpSpMsg || (on ? "열 때마다 바뀐 파일이 있으면 다시 계산합니다." : "회사 마이크로소프트 계정으로 로그인합니다. 연결하면 아래 직접 올린 파일 대신 이 결과를 씁니다."))}</div>`;
+         <div class="sub">${esc(erpSpMsg || (on ? erpSpSummary() : "회사 마이크로소프트 계정으로 로그인합니다. 연결하면 아래 직접 올린 파일 대신 이 결과를 씁니다."))}</div>`;
     const c=$("#erpSpConnect");
     if(c){ c.disabled=erpSpBusy || !window.MmsSp; c.textContent = on ? "⟳ 지금 다시 받기" : "☁ 쉐어포인트 연결"; }
   }
