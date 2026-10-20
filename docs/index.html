@@ -1640,8 +1640,8 @@ function withPo_(rows){
    * 쉐어포인트 [TADC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=2;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
-  const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM"];   // 품목정보 먼저 — 품목구분 기준
+  const ERP_CALC=3;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
   function erpSpSave(o){ try{ o ? localStorage.setItem(ERPSPKEY, JSON.stringify(o)) : localStorage.removeItem(ERPSPKEY); }catch(e){} }
@@ -1668,14 +1668,17 @@ function withPo_(rows){
       if(!interactive && st.sig===sig && erp && erp.src==="sp" && erp.calc===ERP_CALC) return false;
       const files=[];
       let bomNote="⚠ 쉐어포인트에 BOM 파일이 없습니다 — 월평균은 직접 판매만으로 계산 (MMS BOM_MENU 설정 확인)";
+      const orderFiles=[];
       for(const m of metas){
         const got=await MmsSp.download(m.path, false);
-        files.push(new File([got.bytes], `${m.co}_${m.rep}.xlsx`));
+        const f=new File([got.bytes], `${m.co}_${m.rep}.xlsx`);
+        (m.rep==="주문서현황" ? orderFiles : files).push(f);   // 주문서는 판매로 읽히지 않게 따로
       }
       // 품목구분(품목정보·BOM)을 재고·판매보다 먼저 읽어야 BOM 전개를 원재료·상품에서 멈출 수 있다
       files.sort((a,b)=>(/품목/.test(b.name)?1:0)-(/품목/.test(a.name)?1:0));
       const lines=[];
-      const built=await erpBuild(files, t=>lines.push(t), {lastMonths:12});
+      const orders=await erpReadOrders(orderFiles, t=>lines.push(t));
+      const built=await erpBuild(files, t=>lines.push(t), {lastMonths:12, orders});
       if(spBom.length){
         const at=spBom.map(m=>new Date(m.meta.lastModifiedDateTime)).sort((a,b)=>b-a)[0];
         const p2=n=>String(n).padStart(2,"0");
@@ -1686,6 +1689,7 @@ function withPo_(rows){
       const p2=n=>String(n).padStart(2,"0");
       built.stockAt=`${newest.getFullYear()}-${p2(newest.getMonth()+1)}-${p2(newest.getDate())} ${p2(newest.getHours())}:${p2(newest.getMinutes())}`;
       built.src="sp"; built.bomNote=bomNote; built.calc=ERP_CALC;
+      if(orders.files) built.orderNote=`주문서 ${orders.files}개 · 미출고 주문 ${Object.keys(orders.open).length.toLocaleString()}품목 · OEM 거래처 ${orders.cust.size}곳`;
       erp=built; saveErpLocal(built);
       erpSpSave({on:true, sig, at:Date.now()});
       erpSpMsg=`✅ 재고 ${built.stockAt} 기준 · 품목 ${(built.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${bomNote}`;
@@ -1878,6 +1882,29 @@ function withPo_(rows){
   /* ---------- 분석 ---------- */
   // opts.lastMonths: 판매를 최근 N개월만 세고 N으로 나눈다(새벽 자동 계산과 같은 기준).
   //   쉐어포인트 판매현황은 2022년부터 전부 들어 있어 기간을 잘라야 최근 수요가 묽어지지 않는다.
+  /* 주문서현황(MMS 가 하루 1번 받음) — OEM 확정 수요
+   * 주문서를 넣는 거래처 = OEM 거래처. 이 거래처의 과거 판매는 예측(월 예측 · 변동)에서 빼고,
+   * 아직 완료되지 않은 주문 수량을 '확정 주문'으로 따로 더한다(BOM 으로 부품까지 역산).
+   * 진행상태에 완료 · 종결 · 마감 · 취소가 들어간 주문은 이미 끝난 것으로 본다. */
+  async function erpReadOrders(files, log){
+    const open={}, cust=new Set(); let n=0, done=0;
+    for(const f of files){
+      let rows; try{ rows=await erpFileRows(f); }catch(e){ log(`  ⚠ ${f.name} 건너뜀 — ${e.message}`); continue; }
+      const hi=erpHeaderAt(rows,["품목코드","수량"]); if(hi<0){ log(`  ⚠ ${f.name} — 품목코드·수량 열이 없습니다`); continue; }
+      const m=erpCols(rows,hi);
+      const cC=m["품목코드"], cQ=m["수량"], cV=erpCol(m,["거래처명","거래처","판매처명"]), cS=erpCol(m,["진행상태","상태"]);
+      for(let i=hi+1;i<rows.length;i++){
+        const r=rows[i]||[]; const c=erpNorm(r[cC]); if(!c || /^합\s*계$/.test(c)) continue;
+        const q=erpNum(r[cQ]); if(!q) continue;
+        const v=cV!=null?erpCo(r[cV]):"";
+        if(v && GROUPCO.indexOf(v)<0) cust.add(v);
+        if(cS!=null && /완료|종결|마감|취소/.test(erpNorm(r[cS]))){ done++; continue; }
+        open[c]=(open[c]||0)+q; n++;
+      }
+    }
+    if(files.length) log(`주문서 — 미출고 ${n.toLocaleString()}건 (완료 ${done.toLocaleString()}건 제외) · OEM 거래처 ${cust.size}곳`);
+    return {open, cust, files:files.length};
+  }
   async function erpBuild(files, log, opts){
     opts=opts||{};
     let cutYM="";
@@ -1886,6 +1913,7 @@ function withPo_(rows){
     const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={};
     // 안전재고 계산용 월별 수요 — 지난달부터 거꾸로 12개월(이번 달은 아직 덜 끝나 뺀다). 0 = 지난달
     const MV=12, salesM={}, interM={};
+    const oemCust = opts.orders && opts.orders.cust && opts.orders.cust.size ? opts.orders.cust : null;
     const lc=(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.getFullYear()*12+d.getMonth(); })();
     const mIdx=ym=>{ if(!ym) return -1; const k=lc-(+ym.slice(0,4)*12+(+ym.slice(5,7))-1); return (k>=0 && k<MV) ? k : -1; };
     const addM=(o,c,k,q)=>{ if(k<0) return; (o[c]=o[c]||new Array(MV).fill(0))[k]+=q; };
@@ -1958,7 +1986,9 @@ function withPo_(rows){
           const ym=cDate!=null?erpYM(r[cDate]):"";
           // 그룹사끼리 넘긴 물량은 그룹 밖으로 나간 수요가 아니다 (아래 3)에서 따로 본다)
           const isInter = cCust!=null && GROUPCO.indexOf(erpCo(r[cCust]))>=0;
-          addM(isInter?interM:salesM, c, mIdx(ym), q);    // 월별 수요는 지난달부터 12개월 (아래 기간 자르기와 따로)
+          // 월별 수요(예측용)는 지난달부터 12개월. OEM 거래처 판매는 확정 주문으로 따로 잡으므로 예측에서 뺀다
+          const isOem = oemCust && cCust!=null && oemCust.has(erpCo(r[cCust]));
+          if(!isOem) addM(isInter?interM:salesM, c, mIdx(ym), q);
           if(cutYM && ym && ym<cutYM) continue;           // 기간 밖 판매는 세지 않는다
           if(ym) monthSet[ym]=1;
           if(isInter){ inter[c]=(inter[c]||0)+q; grp++; continue; }
@@ -2029,6 +2059,27 @@ function withPo_(rows){
         if(rm){ const a=dbM[c]||(dbM[c]=new Array(MV).fill(0)); for(let k=0;k<MV;k++) a[k]+=out[c]*rm[k]; }
       }
     }
+    // 확정 주문(미출고) — 주문 품목 그대로 + BOM 으로 부품까지 역산
+    const oc={};
+    const openOrders=(opts.orders && opts.orders.open) || {};
+    for(const root in openOrders){
+      const q=openOrders[root];
+      oc[root]=(oc[root]||0)+q;
+      if(!bom[root] || stopAt(root)) continue;
+      const seen=new Set();
+      (function walk(code, qty, depth){
+        if(budget<=0 || depth>12 || seen.has(code) || stopAt(code)) return;
+        const kids=bom[code]; if(!kids) return;
+        seen.add(code);
+        for(let i=0;i<kids.length;i++){
+          if(--budget<=0) break;
+          const ch=kids[i][0], cq=qty*kids[i][1];
+          oc[ch]=(oc[ch]||0)+cq;
+          walk(ch, cq, depth+1);
+        }
+        seen.delete(code);
+      })(root, q, 0);
+    }
     if(budget<=0) log("  ⚠ BOM 구조가 너무 깊어 일부는 생략했습니다");
 
     // 3) 합치기 — 직접 판매 + 생산 투입을 더해야 실제 소요량이 나온다.
@@ -2036,7 +2087,7 @@ function withPo_(rows){
     //    외부로 팔리지도 않는 품목은 '상대 회사가 그만큼 가져다 썼다'는 흔적이
     //    이것뿐이라, 외부판매+BOM 이 그보다 적으면 내부이동량을 대신 쓴다.
     const codes={};
-    [stock,ds,db,name,kind,inter].forEach(o=>{ for(const c in o) codes[c]=1; });
+    [stock,ds,db,name,kind,inter,oc].forEach(o=>{ for(const c in o) codes[c]=1; });
     const items={};
     let both=0;
     for(const c in codes){
@@ -2045,6 +2096,7 @@ function withPo_(rows){
       if(a>0 && b>0) both++;
       const it={ n:name[c]||"" };
       if(stock[c]!=null) it.s=Math.round(stock[c]*100)/100;
+      if(oc[c]>0) it.oc=Math.round(oc[c]*10)/10;
       if(kind[c]) it.k=kind[c];
       if(d>0){ it.d=Math.round(d*10)/10; it.ds=Math.round(a*10)/10; it.db=Math.round(b*10)/10;
                if(iv>a+b) it.di=Math.round(iv*10)/10;
@@ -2784,7 +2836,7 @@ function withPo_(rows){
     const base=[];
     for(const c in erp.items){
       const v=erp.items[c], d=+v.d||0;
-      if(!(d>0) || v.s==null) continue;            // 소요량이나 재고를 모르면 판단 불가
+      if(!(d>0 || v.oc>0) || v.s==null) continue;  // 소요량(또는 확정 주문)이나 재고를 모르면 판단 불가
       base.push({c, v, st:ordStats(v.mv)});
     }
     // ABC — 품목구분마다 1년 수요량 큰 순으로 누적 80% A · 95% B · 나머지 C
@@ -2801,12 +2853,14 @@ function withPo_(rows){
       const xyz = (!v.mv || st.zeros>=6) ? "Z" : (st.cv<0.5?"X":(st.cv<1?"Y":"Z"));
       const cls=abc+xyz, z=ORD_Z[cls]||0.84;
       const og=origin[erpKey(c)]||"", L= og==="dom" ? ltDom : ltOv;
-      const f = v.mv ? st.f : (+v.d||0);           // 월별 자료가 없으면(직접 올린 파일 등) 기존 월평균
+      // 월별 자료가 있으면 그걸로(OEM 판매 뺀 예측), 없으면(직접 올린 파일 등) 기존 월평균
+      const f = v.mv ? st.f : (erp.calc>=3 ? 0 : (+v.d||0));
       const ss = v.mv ? z*st.sd*Math.sqrt(L) : 0;
-      const rop = f*L + ss, upTo = f*(L+R) + ss;
-      const raw=+v.s||0, stock=Math.max(0,raw), cover = f>0 ? stock/f : Infinity;
-      const lvl = raw<0 ? 0 : (stock < f*L ? 1 : (stock < rop ? 2 : (cover > Math.max(12, 2*(L+R)) ? 4 : 3)));
-      out.push({ code:c, name:v.n||"", kind:v.k||"", raw, stock, per:Math.round(f*10)/10, cover, cls, z, L, og,
+      const oc = +v.oc||0;                          // 확정 주문(미출고) — 먼저 내보내야 할 물량
+      const rop = f*L + ss + oc, upTo = f*(L+R) + ss + oc;
+      const raw=+v.s||0, stock=Math.max(0,raw), free=stock-oc, cover = f>0 ? Math.max(0,free)/f : (free>=0?Infinity:0);
+      const lvl = raw<0 ? 0 : (free < f*L || free < 0 ? 1 : (stock < rop ? 2 : (cover > Math.max(12, 2*(L+R)) ? 4 : 3)));
+      out.push({ code:c, name:v.n||"", kind:v.k||"", raw, stock, per:Math.round(f*10)/10, cover, cls, z, L, og, oc:Math.round(oc),
                  sd:Math.round(st.sd*10)/10, ss:Math.round(ss), rop:Math.round(rop), spike:st.spike,
                  need:Math.round(upTo), short: lvl===1||lvl===2 ? Math.max(0, Math.round(upTo-stock)) : 0, lvl });
     });
@@ -2874,6 +2928,7 @@ function withPo_(rows){
     $("#ordNote").innerHTML = erp
       ? `판단 가능한 <b>${rows.length.toLocaleString()}품목</b> 기준 · <b>재주문점 = 월 예측 × 리드타임 + 안전재고</b>, 안전재고 = Z × 월 변동 × √리드타임`
         + ` · 월 예측은 최근 달에 무게를 둔 12개월 가중평균(대량 거래 달 보정) · 리드타임은 발주현황에 국내 발주 이력이 있으면 국내, 아니면 해외`
+        + (erp.orderNote?` · <b>확정 주문</b>: ${esc(erp.orderNote)} — OEM 거래처 판매는 월 예측에서 빼고 미출고 주문을 더함`:` · <span style="color:var(--muted)">주문서현황이 아직 없어 확정 주문은 반영되지 않았습니다</span>`)
         + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
         + (nChk?` · <span style="color:var(--muted)">재고가 음수인 ${nChk}품목은 마감 전 조정 수치로 보고 맨 뒤로 뺐습니다</span>`:"")
         + (kind==="-alloy"?` · <span style="color:var(--muted)">주조 투입·잉곳 ${all.filter(r=>isAlloy(r.code)).length}품목은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
@@ -2884,12 +2939,13 @@ function withPo_(rows){
        <th>품목코드</th><th>품명</th><th>품목구분</th>
        <th title="ABC(수요 크기) · XYZ(변동 정도)">등급</th>
        <th class="num">재고</th><th class="num">월 예측</th><th class="num" title="월 수요 표준편차">월 변동</th>
-       <th class="num">안전재고</th><th class="num">재주문점</th><th class="num">소진 예상</th>
+       <th class="num" title="주문서현황에서 아직 완료되지 않은 주문 (BOM 으로 부품까지)">확정 주문</th>
+       <th class="num">안전재고</th><th class="num">재주문점</th><th class="num" title="(재고 − 확정 주문) ÷ 월 예측">소진 예상</th>
        <th class="num" title="재주문점 아래일 때 (리드타임 + ${needM}개월)치 + 안전재고까지 채우는 수량">발주 제안</th></tr>`;
 
     if(!list.length){
       $("#ordTable tbody").innerHTML=
-        `<tr><td colspan="12"><div class="ord-empty">${erp?"해당하는 품목이 없습니다 👍":"ERP 데이터를 먼저 불러와 주세요"}</div></td></tr>`;
+        `<tr><td colspan="13"><div class="ord-empty">${erp?"해당하는 품목이 없습니다 👍":"ERP 데이터를 먼저 불러와 주세요"}</div></td></tr>`;
       return;
     }
     $("#ordTable tbody").innerHTML=list.slice(0,500).map(r=>`
@@ -2902,13 +2958,14 @@ function withPo_(rows){
         <td class="num">${r.stock.toLocaleString()}${r.raw<0?`<br><span style="font-size:11px;color:var(--muted)">원래 ${r.raw.toLocaleString()}</span>`:""}</td>
         <td class="num">${r.per.toLocaleString()}${r.spike?`<br><span style="font-size:10.5px;color:var(--muted)" title="한 달 판매가 튀어 그 달은 평균으로 바꿔 계산">대량 달 보정</span>`:""}</td>
         <td class="num" style="color:var(--muted)">${r.sd.toLocaleString()}</td>
+        <td class="num">${r.oc?`<b>${r.oc.toLocaleString()}</b>`:"-"}</td>
         <td class="num">${r.ss.toLocaleString()}</td>
         <td class="num">${r.rop.toLocaleString()}</td>
         <td class="num"><span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${
           r.lvl===0?ORDLV[0]:(!isFinite(r.cover)?"-":r.cover.toFixed(1)+"개월")}</span><br><span style="font-size:10.5px;color:${ORDCOLOR[r.lvl]}">${r.lvl?ORDLV[r.lvl]:""}</span></td>
         <td class="num ${r.short?"short":""}">${r.short?r.short.toLocaleString():"-"}</td>
       </tr>`).join("")
-      + (list.length>500?`<tr><td colspan="12"><div class="ord-empty">${list.length.toLocaleString()}품목 중 급한 500개만 보여줍니다 — 검색이나 보기 조건을 좁혀주세요</div></td></tr>`:"");
+      + (list.length>500?`<tr><td colspan="13"><div class="ord-empty">${list.length.toLocaleString()}품목 중 급한 500개만 보여줍니다 — 검색이나 보기 조건을 좁혀주세요</div></td></tr>`:"");
 
     const chkAll=$("#ordAll");
     if(chkAll) chkAll.onclick=()=>{
@@ -3189,8 +3246,8 @@ function withPo_(rows){
     const list=ordFiltered(ordRows());
     if(!list.length){ toast("내보낼 품목이 없습니다"); return; }
     const needM=Math.max(1, ordNum($("#ordNeed").value)||3);
-    const head=["품목코드","품명","품목구분","ABC-XYZ","리드타임(개월)","재고","월 예측","월 변동","안전재고","재주문점","소진 예상(개월)","발주 제안","상태"];
-    const rows=list.map(r=>[r.code,r.name,r.kind,r.cls,r.L,r.stock,r.per,r.sd,r.ss,r.rop,
+    const head=["품목코드","품명","품목구분","ABC-XYZ","리드타임(개월)","재고","월 예측","월 변동","확정 주문","안전재고","재주문점","소진 예상(개월)","발주 제안","상태"];
+    const rows=list.map(r=>[r.code,r.name,r.kind,r.cls,r.L,r.stock,r.per,r.sd,r.oc,r.ss,r.rop,
       r.lvl===0||!isFinite(r.cover)?"":r.cover.toFixed(1),r.short,ORDLV[r.lvl]]);
     const csv="\uFEFF"+[head].concat(rows)
       .map(r=>r.map(c=>`"${String(c==null?"":c).replace(/"/g,'""')}"`).join(",")).join("\n");
