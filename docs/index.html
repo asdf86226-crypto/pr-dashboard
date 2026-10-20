@@ -1640,7 +1640,7 @@ function withPo_(rows){
    * 쉐어포인트 [TADC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=3;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERP_CALC=4;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
   const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
@@ -1689,7 +1689,8 @@ function withPo_(rows){
       const p2=n=>String(n).padStart(2,"0");
       built.stockAt=`${newest.getFullYear()}-${p2(newest.getMonth()+1)}-${p2(newest.getDate())} ${p2(newest.getHours())}:${p2(newest.getMinutes())}`;
       built.src="sp"; built.bomNote=bomNote; built.calc=ERP_CALC;
-      if(orders.files) built.orderNote=`주문서 ${orders.files}개 · 미출고 주문 ${Object.keys(orders.open).length.toLocaleString()}품목 · OEM 거래처 ${orders.cust.size}곳`;
+      if(orders.files) built.orderNote=`주문서 ${orders.files}개 · 미출고 주문 ${Object.keys(orders.open).length.toLocaleString()}품목 · OEM 거래처 ${orders.cust.size}곳`
+        + (orders.late?` · 납기 ${ORD_GRACE}일 넘게 지난 진행중 ${orders.late}건은 이미 나간 것으로 제외`:"");
       erp=built; saveErpLocal(built);
       erpSpSave({on:true, sig, at:Date.now()});
       erpSpMsg=`✅ 재고 ${built.stockAt} 기준 · 품목 ${(built.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${bomNote}`;
@@ -1885,25 +1886,41 @@ function withPo_(rows){
   /* 주문서현황(MMS 가 하루 1번 받음) — OEM 확정 수요
    * 주문서를 넣는 거래처 = OEM 거래처. 이 거래처의 과거 판매는 예측(월 예측 · 변동)에서 빼고,
    * 아직 완료되지 않은 주문 수량을 '확정 주문'으로 따로 더한다(BOM 으로 부품까지 역산).
-   * 진행상태에 완료 · 종결 · 마감 · 취소가 들어간 주문은 이미 끝난 것으로 본다. */
+   * 진행상태에 완료 · 종결 · 마감 · 취소가 들어간 주문은 이미 끝난 것으로 본다.
+   * 출고하고도 주문서를 완료로 바꾸지 않는 경우가 많아(2026-10 태성 진행중 303건 중 253건이 납기 지남),
+   * 납기일자가 ORD_GRACE 일 넘게 지난 진행중 주문도 이미 나간 것으로 본다. 납기일자가 없으면 그대로 센다. */
+  const ORD_GRACE=14;
+  function ordDueISO(v){
+    const s=erpNorm(v).replace(/[./]/g,"-");
+    let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})/);
+    if(m) return m[1]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[3]).padStart(2,"0");
+    const n=parseFloat(s);
+    if(n>20000 && n<80000){ const d=new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000); return d.toISOString().slice(0,10); }
+    return "";
+  }
   async function erpReadOrders(files, log){
-    const open={}, cust=new Set(); let n=0, done=0;
+    const open={}, cust=new Set(); let n=0, done=0, late=0;
+    const g=new Date(); g.setDate(g.getDate()-ORD_GRACE);
+    const cut=g.getFullYear()+"-"+String(g.getMonth()+1).padStart(2,"0")+"-"+String(g.getDate()).padStart(2,"0");
     for(const f of files){
       let rows; try{ rows=await erpFileRows(f); }catch(e){ log(`  ⚠ ${f.name} 건너뜀 — ${e.message}`); continue; }
       const hi=erpHeaderAt(rows,["품목코드","수량"]); if(hi<0){ log(`  ⚠ ${f.name} — 품목코드·수량 열이 없습니다`); continue; }
       const m=erpCols(rows,hi);
-      const cC=m["품목코드"], cQ=m["수량"], cV=erpCol(m,["거래처명","거래처","판매처명"]), cS=erpCol(m,["진행상태","상태"]);
+      const cC=m["품목코드"], cQ=m["수량"], cV=erpCol(m,["거래처명","거래처","판매처명"]), cS=erpCol(m,["진행상태","상태"]),
+            cD=erpCol(m,["납기일자","납기일","납기"]);
       for(let i=hi+1;i<rows.length;i++){
         const r=rows[i]||[]; const c=erpNorm(r[cC]); if(!c || /^합\s*계$/.test(c)) continue;
         const q=erpNum(r[cQ]); if(!q) continue;
         const v=cV!=null?erpCo(r[cV]):"";
         if(v && GROUPCO.indexOf(v)<0) cust.add(v);
         if(cS!=null && /완료|종결|마감|취소/.test(erpNorm(r[cS]))){ done++; continue; }
+        const due=cD!=null?ordDueISO(r[cD]):"";
+        if(due && due<cut){ late++; continue; }      // 납기가 한참 지난 진행중 — 이미 나간 것으로 본다
         open[c]=(open[c]||0)+q; n++;
       }
     }
-    if(files.length) log(`주문서 — 미출고 ${n.toLocaleString()}건 (완료 ${done.toLocaleString()}건 제외) · OEM 거래처 ${cust.size}곳`);
-    return {open, cust, files:files.length};
+    if(files.length) log(`주문서 — 미출고 ${n.toLocaleString()}건 (완료 ${done.toLocaleString()}건 · 납기 ${ORD_GRACE}일 넘게 지난 진행중 ${late.toLocaleString()}건 제외) · OEM 거래처 ${cust.size}곳`);
+    return {open, cust, files:files.length, late};
   }
   async function erpBuild(files, log, opts){
     opts=opts||{};
