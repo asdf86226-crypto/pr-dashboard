@@ -2821,6 +2821,12 @@ function withPo_(rows){
    * ABC = 같은 품목구분 안에서 1년 수요량 누적 80% / 95%,  XYZ = 변동계수(σ÷평균) 0.5 / 1.0 미만 (6개월 이상 안 팔리면 Z)
    * 서비스율: AX·AY·BX 97% (Z 1.88) · AZ·BY·CX 90% (1.28) · 나머지 80% (0.84 — 재고 대신 긴급 보충으로) */
   const ORD_Z={AX:1.88, AY:1.88, BX:1.88, AZ:1.28, BY:1.28, CX:1.28};
+  // 등급(ABC·XYZ)을 쉬운 말로 — 판매량 · 판매 흐름 · 안전재고를 얼마나 두는지
+  const ORD_ABC={A:"많이 팔림", B:"보통", C:"적게 팔림"};
+  const ORD_XYZ={X:"꾸준", Y:"들쭉날쭉", Z:"가끔·불규칙"};
+  const ordSafeWord=z=> z>=1.8 ? "넉넉히" : (z>=1.2 ? "보통" : "최소");
+  const ordSafeColor=z=> z>=1.8 ? "var(--risk-3)" : (z>=1.2 ? "var(--accent)" : "var(--muted)");
+  function ordClsLabel(cls){ return (ORD_ABC[cls[0]]||"")+" · "+(ORD_XYZ[cls[1]]||""); }
   function ordStats(mv){
     let v=(mv||[]).slice(0,12); while(v.length<12) v.push(0);
     const tot=v.reduce((a,b)=>a+b,0);
@@ -2944,6 +2950,7 @@ function withPo_(rows){
 
     $("#ordNote").innerHTML = erp
       ? `판단 가능한 <b>${rows.length.toLocaleString()}품목</b> 기준 · <b>재주문점 = 월 예측 × 리드타임 + 안전재고</b>, 안전재고 = Z × 월 변동 × √리드타임`
+        + ` · <b>판매 유형</b>: 많이 팔리고 꾸준한 품목은 안전재고를 넉넉히(품절 확률 3%), 적게·가끔 팔리는 품목은 최소로(긴급 보충으로 대응)`
         + ` · 월 예측은 최근 달에 무게를 둔 12개월 가중평균(대량 거래 달 보정) · 리드타임은 발주현황에 국내 발주 이력이 있으면 국내, 아니면 해외`
         + (erp.orderNote?` · <b>확정 주문</b>: ${esc(erp.orderNote)} — OEM 거래처 판매는 월 예측에서 빼고 미출고 주문을 더함`:` · <span style="color:var(--muted)">주문서현황이 아직 없어 확정 주문은 반영되지 않았습니다</span>`)
         + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
@@ -2954,7 +2961,7 @@ function withPo_(rows){
     $("#ordTable thead").innerHTML =
       `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
        <th>품목코드</th><th>품명</th><th>품목구분</th>
-       <th title="ABC(수요 크기) · XYZ(변동 정도)">등급</th>
+       <th title="판매량(같은 품목구분 안에서 많이·보통·적게) · 판매 흐름(꾸준·들쭉날쭉·가끔) → 안전재고를 얼마나 둘지">판매 유형</th>
        <th class="num">재고</th><th class="num">월 예측</th><th class="num" title="월 수요 표준편차">월 변동</th>
        <th class="num" title="주문서현황에서 아직 완료되지 않은 주문 (BOM 으로 부품까지)">확정 주문</th>
        <th class="num">안전재고</th><th class="num">재주문점</th><th class="num" title="(재고 − 확정 주문) ÷ 월 예측">소진 예상</th>
@@ -2971,7 +2978,9 @@ function withPo_(rows){
         <td class="mono">${esc(r.code)}</td>
         <td>${esc(r.name)}</td>
         <td style="white-space:nowrap;color:var(--muted)">${esc(r.kind)}</td>
-        <td style="white-space:nowrap" title="서비스율 Z ${r.z} · 리드타임 ${r.L}개월(${r.og==="dom"?"국내 이력":"해외/기본"})"><b>${r.cls}</b> <span style="color:var(--muted);font-size:11px">${r.L}개월</span></td>
+        <td style="white-space:nowrap" title="등급 ${r.cls} · 품절 안 날 확률 목표 ${r.z>=1.8?"97%":(r.z>=1.2?"90%":"80% (재고 대신 긴급 보충)")} · 리드타임 ${r.L}개월(${r.og==="dom"?"국내 발주 이력":"해외/기본"})">
+          <b>${ordClsLabel(r.cls)}</b>
+          <div style="font-size:11px;margin-top:2px"><span style="color:${ordSafeColor(r.z)};font-weight:700">안전재고 ${ordSafeWord(r.z)}</span> <span style="color:var(--muted)">· ${r.og==="dom"?"국내":"해외"} ${r.L}개월</span></div></td>
         <td class="num">${r.stock.toLocaleString()}${r.raw<0?`<br><span style="font-size:11px;color:var(--muted)">원래 ${r.raw.toLocaleString()}</span>`:""}</td>
         <td class="num">${r.per.toLocaleString()}${r.spike?`<br><span style="font-size:10.5px;color:var(--muted)" title="한 달 판매가 튀어 그 달은 평균으로 바꿔 계산">대량 달 보정</span>`:""}</td>
         <td class="num" style="color:var(--muted)">${r.sd.toLocaleString()}</td>
@@ -3263,8 +3272,8 @@ function withPo_(rows){
     const list=ordFiltered(ordRows());
     if(!list.length){ toast("내보낼 품목이 없습니다"); return; }
     const needM=Math.max(1, ordNum($("#ordNeed").value)||3);
-    const head=["품목코드","품명","품목구분","ABC-XYZ","리드타임(개월)","재고","월 예측","월 변동","확정 주문","안전재고","재주문점","소진 예상(개월)","발주 제안","상태"];
-    const rows=list.map(r=>[r.code,r.name,r.kind,r.cls,r.L,r.stock,r.per,r.sd,r.oc,r.ss,r.rop,
+    const head=["품목코드","품명","품목구분","판매 유형","안전재고","리드타임(개월)","재고","월 예측","월 변동","확정 주문","안전재고","재주문점","소진 예상(개월)","발주 제안","상태"];
+    const rows=list.map(r=>[r.code,r.name,r.kind,ordClsLabel(r.cls)+" ("+r.cls+")",ordSafeWord(r.z),r.L,r.stock,r.per,r.sd,r.oc,r.ss,r.rop,
       r.lvl===0||!isFinite(r.cover)?"":r.cover.toFixed(1),r.short,ORDLV[r.lvl]]);
     const csv="\uFEFF"+[head].concat(rows)
       .map(r=>r.map(c=>`"${String(c==null?"":c).replace(/"/g,'""')}"`).join(",")).join("\n");
