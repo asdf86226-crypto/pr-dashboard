@@ -226,6 +226,15 @@
   .ord-tabs button .c{display:inline-block; margin-left:6px; font-size:11.5px; padding:0 7px; border-radius:999px; background:var(--surface-2)}
   .ord-tabs button.on{background:var(--ink); border-color:var(--ink); color:var(--surface)}
   .ord-tabs button.on .c{background:color-mix(in srgb,var(--surface) 25%,transparent); color:var(--surface)}
+  .oc-link{border:0; background:none; padding:0; font:inherit; font-weight:800; color:var(--accent); cursor:pointer; text-decoration:underline; text-underline-offset:3px}
+  .oc-link:hover{filter:brightness(1.2)}
+  .oc-tb{width:100%; border-collapse:collapse; font-size:12.5px}
+  .oc-tb th{text-align:left; font-size:11.5px; color:var(--muted); font-weight:700; padding:7px 8px; border-bottom:1px solid var(--border); background:var(--surface-2)}
+  .oc-tb td{padding:7px 8px; border-bottom:1px solid var(--border); vertical-align:top}
+  .oc-tb .num{text-align:right; font-variant-numeric:tabular-nums}
+  .oc-tb td.mono{white-space:nowrap}
+  .oc-tb .sm{font-size:11px; color:var(--muted); margin-top:2px}
+  .oc-tb tfoot td{font-weight:800; border-bottom:0}
   .og-tag{display:inline-block; font-size:10.5px; font-weight:800; padding:1px 7px; border-radius:999px; margin-right:6px; white-space:nowrap}
   .og-tag.make{background:color-mix(in srgb,#2563eb 14%,transparent); color:#2563eb}
   .og-tag.buy{background:color-mix(in srgb,var(--risk-2) 16%,transparent); color:var(--risk-2)}
@@ -1341,6 +1350,15 @@ function withPo_(rows){
   </div>
 </section>
 
+<!-- 확정 주문 → 주문서 -->
+<div class="modal-bg" id="ocBg">
+  <div class="modal" style="max-width:860px">
+    <div class="mh"><div><h2 id="ocTitle">확정 주문</h2><p id="ocSub"></p></div>
+      <button class="x" id="ocClose" title="닫기">×</button></div>
+    <div class="mb" id="ocBody"></div>
+  </div>
+</div>
+
 <!-- 발주 필요 → 구매요청에 담기 -->
 <div class="modal-bg" id="pickBg">
   <div class="modal" style="max-width:560px">
@@ -1663,7 +1681,7 @@ function withPo_(rows){
    * 쉐어포인트 [TADC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=7;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERP_CALC=8;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
   const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
@@ -1713,6 +1731,7 @@ function withPo_(rows){
       built.stockAt=`${newest.getFullYear()}-${p2(newest.getMonth()+1)}-${p2(newest.getDate())} ${p2(newest.getHours())}:${p2(newest.getMinutes())}`;
       built.src="sp"; built.bomNote=bomNote; built.calc=ERP_CALC;
       ordSetBom(built._bom);
+      built.orderList=orders.list;
       if(orders.files) built.orderNote=`주문서 ${orders.files}개 · 미출고 주문 ${Object.keys(orders.open).length.toLocaleString()}품목 · OEM 거래처 ${orders.cust.size}곳`
         + (orders.late?` · 납기 ${ORD_GRACE}일 넘게 지난 진행중 ${orders.late}건은 이미 나간 것으로 제외`:"");
       erp=built; saveErpLocal(built);
@@ -1923,7 +1942,7 @@ function withPo_(rows){
     return "";
   }
   async function erpReadOrders(files, log){
-    const open={}, cust=new Set(); let n=0, done=0, late=0;
+    const open={}, cust=new Set(), list=[]; let n=0, done=0, late=0;
     const g=new Date(); g.setDate(g.getDate()-ORD_GRACE);
     const cut=g.getFullYear()+"-"+String(g.getMonth()+1).padStart(2,"0")+"-"+String(g.getDate()).padStart(2,"0");
     for(const f of files){
@@ -1931,7 +1950,9 @@ function withPo_(rows){
       const hi=erpHeaderAt(rows,["품목코드","수량"]); if(hi<0){ log(`  ⚠ ${f.name} — 품목코드·수량 열이 없습니다`); continue; }
       const m=erpCols(rows,hi);
       const cC=m["품목코드"], cQ=m["수량"], cV=erpCol(m,["거래처명","거래처","판매처명"]), cS=erpCol(m,["진행상태","상태"]),
-            cD=erpCol(m,["납기일자","납기일","납기"]);
+            cD=erpCol(m,["납기일자","납기일","납기"]), cNo=erpCol(m,["일자-No.","일자-No","일자"]), cN=erpCol(m,["품목명","품명"]),
+            cM=erpCol(m,["적요"]);
+      const co=(f.name.match(/^([^_]+)_/)||[])[1]||"";
       for(let i=hi+1;i<rows.length;i++){
         const r=rows[i]||[]; const c=erpNorm(r[cC]); if(!c || /^합\s*계$/.test(c)) continue;
         const q=erpNum(r[cQ]); if(!q) continue;
@@ -1941,10 +1962,13 @@ function withPo_(rows){
         const due=cD!=null?ordDueISO(r[cD]):"";
         if(due && due<cut){ late++; continue; }      // 납기가 한참 지난 진행중 — 이미 나간 것으로 본다
         open[c]=(open[c]||0)+q; n++;
+        // 확정 주문 숫자를 눌렀을 때 어떤 주문서인지 보여주려고 한 줄씩 남겨 둔다
+        list.push({no:cNo!=null?erpNorm(r[cNo]):"", co, v:cV!=null?erpNorm(r[cV]):"", c, n:cN!=null?erpNorm(r[cN]):"",
+                   q, due, st:cS!=null?erpNorm(r[cS]):"", m:cM!=null?erpNorm(r[cM]):""});
       }
     }
     if(files.length) log(`주문서 — 미출고 ${n.toLocaleString()}건 (완료 ${done.toLocaleString()}건 · 납기 ${ORD_GRACE}일 넘게 지난 진행중 ${late.toLocaleString()}건 제외) · OEM 거래처 ${cust.size}곳`);
-    return {open, cust, files:files.length, late};
+    return {open, cust, files:files.length, late, list};
   }
   async function erpBuild(files, log, opts){
     opts=opts||{};
@@ -2943,6 +2967,51 @@ function withPo_(rows){
     return list;
   }
 
+  /* ---------- 확정 주문 → 주문서 팝업 ----------
+   * 주문서 품목이면 그 주문 줄을, 부품이면 BOM 으로 그 부품이 들어가는 주문을 찾아 '이 품목 몫' 수량과 함께 보여준다. */
+  const ocCell=r=> r.oc ? `<button type="button" class="oc-link" data-code="${esc(r.code)}" title="주문서 보기">${r.oc.toLocaleString()}</button>` : "-";
+  function ocOrdersFor(code){
+    const list=(erp && erp.orderList)||[], out=[];
+    const stop=c=>{ const k=(erp.items[c]||{}).k; return k==="[원재료]"||k==="[상품]"; };
+    list.forEach(o=>{
+      if(o.c===code){ out.push(Object.assign({use:o.q, via:""}, o)); return; }
+      if(!ordBom || !ordBom[o.c] || stop(o.c)) return;
+      let use=0, budget=5000; const seen=new Set();
+      (function walk(c, qty, depth){
+        if(budget<=0 || depth>12 || seen.has(c) || stop(c)) return;
+        const kids=ordBom[c]; if(!kids) return;
+        seen.add(c);
+        for(const [ch, per] of kids){ if(--budget<=0) break; const q=qty*per; if(ch===code) use+=q; walk(ch, q, depth+1); }
+        seen.delete(c);
+      })(o.c, o.q, 0);
+      if(use>0) out.push(Object.assign({use, via:o.c}, o));
+    });
+    return out.sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999") || a.no.localeCompare(b.no));
+  }
+  function openOc(code){
+    const it=(erp && erp.items[code])||{}, rows=ocOrdersFor(code);
+    const fmt=v=>(Math.round(v*100)/100).toLocaleString();
+    const today=todayISO(), tot=rows.reduce((s,o)=>s+o.use,0), via=rows.some(o=>o.via);
+    $("#ocTitle").textContent=`${code}${it.n?" · "+it.n:""}`;
+    $("#ocSub").innerHTML=`확정 주문 <b>${fmt(+it.oc||0)}</b>개 · 주문서 ${rows.length.toLocaleString()}줄`
+      + (via?` · 이 품목이 들어가는 제품 주문도 BOM 으로 함께 셌습니다`:"");
+    $("#ocBody").innerHTML = !(erp && erp.orderList)
+      ? `<div class="ord-empty">주문서 목록이 아직 없습니다 — <b>⚙ ERP 데이터 → ⟳ 지금 다시 받기</b>를 한 번 눌러 주세요</div>`
+      : !rows.length ? `<div class="ord-empty">이 품목이 들어간 미출고 주문을 찾지 못했습니다</div>`
+      : `<table class="oc-tb"><thead><tr><th>주문일자-No.</th><th>거래처</th>${via?"<th>주문 품목</th>":""}
+          <th class="num">주문 수량</th>${via?`<th class="num">이 품목 몫</th>`:""}<th>납기일자</th><th>상태</th></tr></thead><tbody>`
+        + rows.map(o=>{
+            const late=o.due && o.due<today;
+            return `<tr><td class="mono">${esc(o.no||"-")}${o.co?`<div class="sm">${esc(o.co)}</div>`:""}</td>
+              <td>${esc(o.v||"-")}${o.m?`<div class="sm">${esc(o.m)}</div>`:""}</td>
+              ${via?`<td>${o.via?`<span class="mono">${esc(o.c)}</span><div class="sm">${esc(o.n)}</div>`:`<span class="sm">이 품목 그대로</span>`}</td>`:""}
+              <td class="num">${fmt(o.q)}</td>${via?`<td class="num"><b>${fmt(o.use)}</b></td>`:""}
+              <td style="white-space:nowrap${late?";color:var(--risk-1);font-weight:700":""}">${esc(o.due||"-")}${late?`<div class="sm" style="color:var(--risk-1)">납기 지남</div>`:""}</td>
+              <td style="white-space:nowrap">${esc(o.st||"-")}</td></tr>`; }).join("")
+        + `</tbody><tfoot><tr><td colspan="${via?4:2}">합계</td>${via?"":`<td class="num"><b>${fmt(tot)}</b></td>`}${via?`<td class="num"><b>${fmt(tot)}</b></td>`:""}<td colspan="2"></td></tr></tfoot></table>`;
+    $("#ocBg").classList.add("show");
+  }
+
   const ORDLV=["확인필요","위험","발주 시점","적정","과재고"];
   const ORDCOLOR=["var(--muted)","var(--risk-1)","var(--risk-2)","var(--risk-3)","#7c3aed"];
 
@@ -3045,7 +3114,7 @@ function withPo_(rows){
         <td style="white-space:nowrap">${todo}</td>
         <td class="num">${p.stock.toLocaleString()}</td>
         <td class="num">${p.per.toLocaleString()}</td>
-        <td class="num">${p.oc?`<b>${p.oc.toLocaleString()}</b>`:"-"}</td>
+        <td class="num">${ocCell(p)}</td>
         <td class="num">${cov(p)}<br><span style="font-size:10.5px;color:${ORDCOLOR[p.lvl]}">${ORDLV[p.lvl]}</span></td>
         <td class="num short">${p.short.toLocaleString()}</td></tr>`;
       g.kids.forEach(k=>{
@@ -3070,14 +3139,14 @@ function withPo_(rows){
           <td style="white-space:nowrap;color:var(--muted)">${esc(r.kind)}</td>
           <td style="white-space:nowrap">${r.kind==="[반제품]"?`<span class="og-tag make">생산 필요</span>`:`<span class="og-tag buy">발주 필요</span>`}</td>
           <td class="num">${r.stock.toLocaleString()}</td><td class="num">${r.per.toLocaleString()}</td>
-          <td class="num">${r.oc?`<b>${r.oc.toLocaleString()}</b>`:"-"}</td>
+          <td class="num">${ocCell(r)}</td>
           <td class="num">${cov(r)}<br><span style="font-size:10.5px;color:${ORDCOLOR[r.lvl]}">${ORDLV[r.lvl]}</span></td>
           <td class="num short">${r.short.toLocaleString()}</td></tr>`;
       });
     }
     $("#ordTable tbody").innerHTML=html;
     $("#ordTable").querySelectorAll("tr.og-p").forEach(tr=>tr.onclick=e=>{
-      if(e.target.closest("input")) return;
+      if(e.target.closest("input,.oc-link")) return;
       const kids=$("#ordTable").querySelectorAll(`tr.og-c[data-pg="${tr.dataset.g}"]`);
       if(!kids.length) return;
       const open=kids[0].hidden;
@@ -3203,7 +3272,7 @@ function withPo_(rows){
         <td class="num">${r.stock.toLocaleString()}${r.raw<0?`<br><span style="font-size:11px;color:var(--muted)">원래 ${r.raw.toLocaleString()}</span>`:""}</td>
         <td class="num">${r.per.toLocaleString()}${r.spike?`<br><span style="font-size:10.5px;color:var(--muted)" title="한 달 판매가 튀어 그 달은 평균으로 바꿔 계산">대량 달 보정</span>`:""}</td>
         <td class="num" style="color:var(--muted)">${r.sd.toLocaleString()}</td>
-        <td class="num">${r.oc?`<b>${r.oc.toLocaleString()}</b>`:"-"}</td>
+        <td class="num">${ocCell(r)}</td>
         <td class="num">${r.ss.toLocaleString()}</td>
         <td class="num">${r.rop.toLocaleString()}</td>
         <td class="num"><span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${
@@ -3486,6 +3555,11 @@ function withPo_(rows){
   ["ordRisk","ordKind","ordLtOv","ordLtDom","ordNeed","ordSearch","ordGroup"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("input", renderOrder);
   });
+
+  $("#ordTable").addEventListener("click", e=>{ const b=e.target.closest(".oc-link"); if(b){ e.stopPropagation(); openOc(b.dataset.code); } });
+  $("#ocClose").onclick=()=>$("#ocBg").classList.remove("show");
+  $("#ocBg").onclick=e=>{ if(e.target===$("#ocBg")) $("#ocBg").classList.remove("show"); };
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") $("#ocBg").classList.remove("show"); });
 
   $("#ordInfo").onclick=()=>{
     const n=$("#ordNote"), b=$("#ordInfo"); n.hidden=!n.hidden;
