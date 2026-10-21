@@ -2956,8 +2956,8 @@ function withPo_(rows){
   const ordIsTop=k=>k==="[제품]"||k==="[상품]";
   function ordGroups(rows){
     const by={}; rows.forEach(r=>by[r.code]=r);
-    const pool={};                                   // 부품별 아직 안 쓴 재고 (재고 − 확정 주문)
-    const avail=c=>{ if(pool[c]==null){ const it=erp.items[c]; pool[c]=it&&it.s!=null ? Math.max(0,(+it.s||0)-(+it.oc||0)) : 0; } return pool[c]; };
+    const pool={}, init={};                          // 부품별 아직 안 쓴 재고 (재고 − 확정 주문) · 처음 값
+    const avail=c=>{ if(pool[c]==null){ const it=erp.items[c]; pool[c]=init[c]=it&&it.s!=null ? Math.max(0,(+it.s||0)-(+it.oc||0)) : 0; } return pool[c]; };
     const stop=c=>{ const k=(erp.items[c]||{}).k; return k==="[원재료]"||k==="[상품]"; };
     const tops=rows.filter(r=>ordIsTop(r.kind) && (r.lvl===1||r.lvl===2));
     const covered=new Set();
@@ -2970,9 +2970,11 @@ function withPo_(rows){
           for(const [c, per] of list){
             if(--budget<0 || depth>10) return;
             const q=qty*per; if(!(q>0)) continue;
-            const take=Math.min(avail(c), q); pool[c]-=take;
+            const before=avail(c);
+            const take=Math.min(before, q); pool[c]-=take;
             const left=q-take;
-            const k=(kids[c]=kids[c]||{need:0, use:0, short:0, depth});
+            // before = 이 제품이 처음 손댈 때 남아 있던 재고 → 그 전에 다른(더 급한) 제품이 쓴 양을 알 수 있다
+            const k=(kids[c]=kids[c]||{need:0, use:0, short:0, depth, before});
             k.need+=q; k.use+=take;
             if(left<=0) continue;
             if(ordBom[c] && !stop(c)) need(c, left, depth+1);   // 반제품 — 모자라는 만큼 그 아래로
@@ -2984,7 +2986,9 @@ function withPo_(rows){
       const shortKids=Object.keys(kids).filter(c=>kids[c].short>0.5).map(c=>{
         const it=erp.items[c]||{};
         return {code:c, name:it.n||"", kind:it.k||"", need:Math.round(kids[c].need), use:Math.round(kids[c].use),
-                short:Math.ceil(kids[c].short), depth:kids[c].depth};
+                short:Math.ceil(kids[c].short), depth:kids[c].depth,
+                stock:Math.max(0, Math.round(+it.s||0)), oc:Math.round(+it.oc||0),
+                usedBefore:Math.max(0, Math.round((init[c]||0)-kids[c].before))};
       }).sort((a,b)=>b.short-a.short);
       return {p, kids:shortKids, bomKnown: !!(ordBom && ordBom[p.code])};
     });
@@ -3036,7 +3040,9 @@ function withPo_(rows){
           <td class="mono ind">${"· ".repeat(k.depth)}└ ${esc(k.code)}</td>
           <td>${esc(k.name)}</td>
           <td style="white-space:nowrap;color:var(--muted)">${esc(k.kind)}</td>
-          <td style="white-space:nowrap"><span class="og-tag buy">발주 필요</span><span style="color:var(--muted);font-size:11.5px">필요 ${k.need.toLocaleString()} · 재고로 ${k.use.toLocaleString()}</span></td>
+          <td style="white-space:nowrap"><span class="og-tag buy">발주 필요</span><span style="color:var(--muted);font-size:11.5px">필요 ${k.need.toLocaleString()} · 재고 ${k.stock.toLocaleString()}${
+            k.oc?` (확정 주문 몫 ${k.oc.toLocaleString()})`:""}${
+            k.usedBefore?` · <b style="color:var(--risk-2)">앞 제품이 ${k.usedBefore.toLocaleString()} 사용</b>`:""} → 이 제품에 ${k.use.toLocaleString()}</span></td>
           <td class="num" colspan="4" style="color:var(--muted);font-size:11.5px">${p.short.toLocaleString()}개 만들 때 모자람</td>
           <td class="num short">${k.short.toLocaleString()}</td></tr>`;
       });
