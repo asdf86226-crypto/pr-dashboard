@@ -1655,7 +1655,7 @@ function withPo_(rows){
    * 쉐어포인트 [TADC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=5;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERP_CALC=6;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
   const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
