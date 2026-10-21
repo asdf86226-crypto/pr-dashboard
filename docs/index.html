@@ -216,6 +216,15 @@
   .ord-tb tr.og-c td{background:var(--surface-2); font-size:12.5px; padding-top:6px; padding-bottom:6px}
   .ord-tb tr.og-c td.ind{padding-left:30px}
   .ord-tb tr.og-sec td{background:var(--accent-soft); font-weight:800; font-size:12.5px; color:var(--ink)}
+  .ord-info{border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:11.5px; font-weight:700;
+            padding:3px 10px; border-radius:999px; cursor:pointer; margin-left:8px; vertical-align:middle}
+  .ord-info:hover, .ord-info.on{color:var(--ink); border-color:var(--ink)}
+  .ord-tabs{display:flex; gap:6px; margin:0 0 10px; flex-wrap:wrap}
+  .ord-tabs button{border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:13px; font-weight:800;
+                   padding:7px 14px; border-radius:9px; cursor:pointer}
+  .ord-tabs button .c{display:inline-block; margin-left:6px; font-size:11.5px; padding:0 7px; border-radius:999px; background:var(--surface-2)}
+  .ord-tabs button.on{background:var(--ink); border-color:var(--ink); color:var(--surface)}
+  .ord-tabs button.on .c{background:color-mix(in srgb,var(--surface) 25%,transparent); color:var(--surface)}
   .og-tag{display:inline-block; font-size:10.5px; font-weight:800; padding:1px 7px; border-radius:999px; margin-right:6px; white-space:nowrap}
   .og-tag.make{background:color-mix(in srgb,#2563eb 14%,transparent); color:#2563eb}
   .og-tag.buy{background:color-mix(in srgb,var(--risk-2) 16%,transparent); color:var(--risk-2)}
@@ -1015,8 +1024,7 @@ function withPo_(rows){
         <span class="ic">i</span>
         <span><b>두 가지는 일부러 빼두었습니다.</b>
           <b>재고가 음수</b>인 품목은 마감 전 조정 수치라 <b>확인필요</b>로 맨 뒤에 두고,
-          <b>주조에 들어가는 합금 원료·잉곳</b>(아연·주석·황동잉곳 등)은 BOM 수량을 믿을 수 없어 기본 목록에서 뺐습니다.
-          보려면 위쪽 <b>품목구분</b>을 <b>전체</b>로 바꾸세요.</span>
+          <b>주조에 들어가는 합금 원료·잉곳</b>(아연·주석·황동잉곳 등)은 발주 필요 · 판매 조회 어디에도 보이지 않게 뺐습니다.</span>
       </div>
 
       <h3><span class="n">7</span>주의사항</h3>
@@ -1290,8 +1298,8 @@ function withPo_(rows){
 
 <section class="ord" id="pageOrder" hidden>
   <div class="card" style="padding:16px 18px">
-    <h2 style="font-size:16px; font-weight:800; margin:0 0 4px">발주가 필요한 품목</h2>
-    <p class="ord-note" id="ordNote"></p>
+    <h2 style="font-size:16px; font-weight:800; margin:0 0 8px">발주가 필요한 품목<button type="button" class="ord-info" id="ordInfo" title="계산 기준 · 설명 보기">ⓘ 계산 기준 보기</button></h2>
+    <p class="ord-note" id="ordNote" hidden></p>
 
     <div class="ord-ctl">
       <div class="f"><label>묶어 보기</label>
@@ -1309,7 +1317,6 @@ function withPo_(rows){
         </select></div>
       <div class="f"><label>품목구분</label>
         <select id="ordKind">
-          <option value="-alloy">합금 원료·잉곳 제외</option>
           <option value="">전체</option>
         </select></div>
       <div class="f"><label title="발주부터 입고까지 걸리는 기간">리드타임 해외(개월)</label><input id="ordLtOv" type="number" min="0.5" step="0.5" value="2" style="width:110px"></div>
@@ -1320,6 +1327,10 @@ function withPo_(rows){
     </div>
 
     <div class="ord-kpis" id="ordKpis"></div>
+    <div class="ord-tabs" id="ordTabs" hidden>
+      <button type="button" data-t="prod" class="on">제품 · 상품<span class="c" id="ordTabP"></span></button>
+      <button type="button" data-t="part">제품과 상관없이 부족한 부품<span class="c" id="ordTabO"></span></button>
+    </div>
 
     <div class="ord-wrap">
       <table class="ord-tb" id="ordTable"><thead></thead><tbody></tbody></table>
@@ -2823,7 +2834,7 @@ function withPo_(rows){
   let ordPage=false;
   /* 주조(용해) 공정에 들어가고 나오는 품목들. BOM 소요량이 배합비가 아니라 1 로
      들어와 있어 수량을 믿을 수 없다 — 비쓰무트는 재고 33인데 월평균이 28,417 로 잡힌다.
-     기본값에서 빼두고, 필요하면 '전체'로 바꿔 볼 수 있다.
+     담당 품목이 아니라 발주 필요 · 판매 조회 어디에도 보이지 않게 아예 뺀다.
      빼거나 더할 코드가 생기면 이 목록만 고치면 된다. */
   const ALLOY=new Set([
     "Zn","Al","ALB","Pb","Bi","Ni","Sn","CuP","Sb",      // 합금 원료
@@ -2832,7 +2843,8 @@ function withPo_(rows){
   // 잉곳·주물분은 등급별로 코드가 계속 생긴다(INGOT.A/B/C/C-1/R/LF/DR…).
   // 하나씩 적는 대신 앞글자로 잡아 새 코드도 저절로 빠지게 한다.
   const ALLOYRE=/^(INGOT|Chip-)/i;
-  const isAlloy=code=>ALLOY.has(code)||ALLOYRE.test(code);
+  const ALLOYU=new Set([...ALLOY].map(c=>c.toUpperCase()));
+  const isAlloy=code=>{ const c=String(code||"").trim(); return ALLOYU.has(c.toUpperCase())||ALLOYRE.test(c); };
   const ordNum=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
 
   /* 안전재고 · 재주문점
@@ -2882,6 +2894,7 @@ function withPo_(rows){
     const base=[];
     for(const c in erp.items){
       const v=erp.items[c], d=+v.d||0;
+      if(isAlloy(c)) continue;                       // 합금 원료·잉곳은 아예 보지 않는다
       if(!(d>0 || v.oc>0) || v.s==null) continue;  // 소요량(또는 확정 주문)이나 재고를 모르면 판단 불가
       base.push({c, v, st:ordStats(v.mv)});
     }
@@ -2922,8 +2935,7 @@ function withPo_(rows){
     const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
     const kind=(($("#ordKind")||{}).value);
     let list=rows.filter(r=>{
-      if(kind==="-alloy"){ if(isAlloy(r.code)) return false; }
-      else if(kind && r.kind!==kind) return false;
+      if(kind && r.kind!==kind) return false;
       if(mode==="chk") return r.lvl===0;
       if(mode==="red") return r.lvl===1;
       if(mode==="over") return r.lvl===4;
@@ -2954,6 +2966,7 @@ function withPo_(rows){
     try{ const b=await salKv("readonly", st=>st.get("bom")); if(b){ ordBom=b; if(ordPage) renderOrder(); } }catch(e){}
   }
   const ordIsTop=k=>k==="[제품]"||k==="[상품]";
+  let ordTab="prod";                               // 제품 기준 보기의 탭: prod 제품·상품 / part 따로 부족한 부품
   function ordGroups(rows){
     const by={}; rows.forEach(r=>by[r.code]=r);
     const pool={}, init={};                          // 부품별 아직 안 쓴 재고 (재고 − 확정 주문) · 처음 값
@@ -2969,7 +2982,7 @@ function withPo_(rows){
           const list=ordBom[code]||[];
           for(const [c, per] of list){
             if(--budget<0 || depth>10) return;
-            const q=qty*per; if(!(q>0)) continue;
+            const q=qty*per; if(!(q>0) || isAlloy(c)) continue;
             const before=avail(c);
             const take=Math.min(before, q); pool[c]-=take;
             const left=q-take;
@@ -3005,19 +3018,23 @@ function withPo_(rows){
     const lvOk=r=> mode==="red" ? r.lvl===1 : true;
     const gs=groups.filter(g=>lvOk(g.p) && (hit(g.p.code+" "+g.p.name) || g.kids.some(k=>hit(k.code+" "+k.name))));
     const os=others.filter(r=>lvOk(r) && hit(r.code+" "+r.name));
+    const tabs=$("#ordTabs"); tabs.hidden=false;
+    $("#ordTabP").textContent=gs.length.toLocaleString(); $("#ordTabO").textContent=os.length.toLocaleString();
+    tabs.querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.t===ordTab));
+    const showP=ordTab==="prod";
     $("#ordTable thead").innerHTML =
       `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
        <th style="width:150px">품목코드</th><th style="width:34%;min-width:240px">품명</th><th style="width:80px">품목구분</th>
        <th>해야 할 일</th><th class="num">재고</th><th class="num">월 예측</th><th class="num">확정 주문</th>
        <th class="num">소진 예상</th><th class="num" title="제품: 만들 수량 · 부품: 이 제품 몫으로 모자라는 수량">수량</th></tr>`;
-    if(!gs.length && !os.length){
+    if(showP ? !gs.length : !os.length){
       $("#ordTable tbody").innerHTML=`<tr><td colspan="10"><div class="ord-empty">${erp?"해당하는 품목이 없습니다 👍":"ERP 데이터를 먼저 불러와 주세요"}</div></td></tr>`;
       return;
     }
     const chk=(code, qty)=>`<input type="checkbox" class="ordChk" data-code="${esc(code)}" data-qty="${qty}">`;
     const cov=r=>`<span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${r.lvl===0?ORDLV[0]:(!isFinite(r.cover)?"-":r.cover.toFixed(1)+"개월")}</span>`;
     let html = ordBom ? "" : `<tr class="og-sec"><td colspan="10">⚠ BOM 구조를 아직 불러오지 못해 제품 아래 부품을 펼칠 수 없습니다 — <b>⚙ ERP 데이터 → ⟳ 지금 다시 받기</b>를 한 번 눌러 주세요</td></tr>`;
-    gs.slice(0,300).forEach((g,gi)=>{
+    if(showP) gs.slice(0,300).forEach((g,gi)=>{
       // BOM 이 있는 제품만 '생산'. BOM 이 없는 [제품]은 완제품으로 사 오는 품목으로 보고 발주 대상
       const p=g.p, make=p.kind==="[제품]" && g.bomKnown;
       const todo = make
@@ -3047,8 +3064,8 @@ function withPo_(rows){
           <td class="num short">${k.short.toLocaleString()}</td></tr>`;
       });
     });
-    if(os.length){
-      html+=`<tr class="og-sec"><td colspan="10">위 제품들과 상관없이 부족한 부품 · 원재료 ${os.length.toLocaleString()}개 — A/S 판매나 다른 제품에 앞으로 쓸 양(재주문점) 기준</td></tr>`;
+    if(!showP && os.length){
+      html+=`<tr class="og-sec"><td colspan="10">'제품 · 상품' 탭에 올라온 제품과 상관없이 부족한 부품 · 원재료 ${os.length.toLocaleString()}개 — A/S 판매나 다른 제품에 앞으로 쓸 양(재주문점) 기준</td></tr>`;
       os.slice(0,300).forEach(r=>{
         html+=`<tr class="${r.lvl===1?"red":""}">
           <td>${chk(r.code, r.short)}</td>
@@ -3076,8 +3093,7 @@ function withPo_(rows){
     const all=ordRows();
     // 배지와 KPI 는 화면에 보이는 기준(품목구분 필터)과 같아야 혼란이 없다
     const kind=(($("#ordKind")||{}).value);
-    const rows = kind==="-alloy" ? all.filter(r=>!isAlloy(r.code))
-               : (kind ? all.filter(r=>r.kind===kind) : all);
+    const rows = kind ? all.filter(r=>r.kind===kind) : all;
     const nRed=rows.filter(r=>r.lvl===1).length;
     const nAmb=rows.filter(r=>r.lvl===2).length;
     const nChk=rows.filter(r=>r.lvl===0).length;
@@ -3091,7 +3107,7 @@ function withPo_(rows){
     if(!ordPage) return;                            // 배지만 갱신하고 끝
 
     const sel=$("#ordKind");
-    if(sel && sel.options.length<=2){
+    if(sel && sel.options.length<=1){
       const kinds=[...new Set(all.map(r=>r.kind).filter(Boolean))].sort();
       kinds.forEach(k=>{ const o=document.createElement("option"); o.value=k; o.textContent=k; sel.appendChild(o); });
     }
@@ -3135,7 +3151,7 @@ function withPo_(rows){
         + (erp.orderNote?` · <b>확정 주문</b>: ${esc(erp.orderNote)} — OEM 거래처 판매는 월 예측에서 빼고 미출고 주문을 더함`:` · <span style="color:var(--muted)">주문서현황이 아직 없어 확정 주문은 반영되지 않았습니다</span>`)
         + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
         + (nChk?` · <span style="color:var(--muted)">재고가 음수인 ${nChk}품목은 마감 전 조정 수치로 보고 맨 뒤로 뺐습니다</span>`:"")
-        + (kind==="-alloy"?` · <span style="color:var(--muted)">주조 투입·잉곳 ${all.filter(r=>isAlloy(r.code)).length}품목은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
+        + ` · <span style="color:var(--muted)">합금 원료·잉곳은 목록에서 뺐습니다</span>`
       : `⚠ ERP 데이터가 아직 없습니다. <b>⚙ ERP 데이터</b> 에서 먼저 불러와 주세요.`;
 
     if((($("#ordGroup")||{}).value||"prod")==="prod" && ($("#ordRisk")||{}).value!=="over" && ($("#ordRisk")||{}).value!=="all" && ($("#ordRisk")||{}).value!=="chk"){
@@ -3146,6 +3162,7 @@ function withPo_(rows){
       ordCount();
       return;
     }
+    $("#ordTabs").hidden=true;
     $("#ordTable thead").innerHTML =
       `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
        <th style="width:130px">품목코드</th><th style="width:30%;min-width:240px">품명</th><th style="width:80px">품목구분</th>
@@ -3388,7 +3405,7 @@ function withPo_(rows){
     if(!salIdx){ out.innerHTML=`<div class="ord-note">판매현황을 아직 받지 못했습니다.</div>`; return; }
     const from=salYmd($("#salFrom").value)||19000101, to=salYmd($("#salTo").value)||99991231;
     if(from>to){ out.innerHTML=`<div class="ord-note">시작일이 종료일보다 늦습니다.</div>`; return; }
-    let it=salIdx[erpKey(code)];
+    let it=isAlloy(code) ? null : salIdx[erpKey(code)];
     if(!it){
       // 품목코드를 다 치지 않았으면 비슷한 코드를 찾아 고르게 한다 (하나뿐이면 바로 그 품목)
       const c=salCandidates(code);
@@ -3420,7 +3437,7 @@ function withPo_(rows){
     let hit=all.filter(c=>c.includes(k));
     if(!hit.length){ const t=q.trim().toLowerCase(); hit=all.filter(c=>(salIdx[c].n||"").toLowerCase().includes(t)); }
     const a12=salRecent(12), today=salYmd(todayISO());
-    return hit.map(c=>salIdx[c])
+    return hit.map(c=>salIdx[c]).filter(it=>!isAlloy(it.c))
       .map(it=>({it, pre:erpKey(it.c).startsWith(k)?0:1, q:salSum(it,a12,today).ext}))
       .sort((x,y)=>x.pre-y.pre || y.q-x.q || x.it.c.localeCompare(y.it.c))
       .map(x=>Object.assign(x.it,{_q12:x.q}));
@@ -3455,6 +3472,12 @@ function withPo_(rows){
   ["ordRisk","ordKind","ordLtOv","ordLtDom","ordNeed","ordSearch","ordGroup"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("input", renderOrder);
   });
+
+  $("#ordInfo").onclick=()=>{
+    const n=$("#ordNote"), b=$("#ordInfo"); n.hidden=!n.hidden;
+    b.classList.toggle("on", !n.hidden); b.textContent=n.hidden?"ⓘ 계산 기준 보기":"ⓘ 계산 기준 닫기";
+  };
+  $("#ordTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{ ordTab=b.dataset.t; renderOrder(); });
 
   $("#ordCsv").onclick=()=>{
     const list=ordFiltered(ordRows());
