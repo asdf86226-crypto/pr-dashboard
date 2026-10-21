@@ -131,7 +131,7 @@
   .sal-list .nm{flex:1; color:var(--muted)}
   .sal-list .q{font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
   @media (max-width:760px){ .ord-kpis.sal-kpis{grid-template-columns:1fr} }
-  .sal-kpis .sb{font-size:11.5px; color:var(--muted); margin-top:3px; font-weight:600}
+  .ord-kpi .sb{font-size:11.5px; color:var(--muted); margin-top:3px; font-weight:600}
   .sal-top{list-style:none; margin:10px 0 0; padding:0; font-size:13px}
   .sal-top li{display:grid; grid-template-columns:22px 1fr auto auto; gap:8px; align-items:baseline; padding:4px 0; border-top:1px dashed var(--border)}
   .sal-top li:first-child{border-top:0}
@@ -3130,6 +3130,23 @@ function withPo_(rows){
            <div class="vl">${Math.round(qBuy).toLocaleString()}<span class="u">개</span></div></div>
          <div class="ord-kpi"><div class="lb">과재고 · 재고 확인필요</div>
            <div class="vl"><span style="color:#7c3aed">${nOver.toLocaleString()}</span><span class="u">품목</span> · <span style="color:var(--muted)">${nChk.toLocaleString()}</span></div></div>`;
+    }else if(["over","chk"].includes(($("#ordRisk")||{}).value)){
+      // 과재고 · 확인필요를 볼 때는 그 목록에 맞는 숫자만 — 위험·발주 시점 숫자가 섞이면 헷갈린다
+      const over=rows.filter(r=>r.lvl===4);
+      const extra=over.reduce((s,r)=>s+Math.max(0, r.stock-r.need),0);
+      const months=over.filter(r=>r.per>0).map(r=>r.cover).sort((a,b)=>a-b);
+      const mid=months.length ? months[Math.floor(months.length/2)] : 0;
+      const dead=over.filter(r=>!(r.per>0)).length;
+      $("#ordKpis").innerHTML=
+        `<div class="ord-kpi"><div class="lb">과재고 — 1년 넘게 버티는 재고</div>
+           <div class="vl" style="color:#7c3aed">${nOver.toLocaleString()}<span class="u">품목</span></div></div>
+         <div class="ord-kpi"><div class="lb" title="재고 − (리드타임 + 1회 발주 개월치 + 안전재고)">넘치는 수량 합계</div>
+           <div class="vl">${Math.round(extra).toLocaleString()}<span class="u">개</span></div></div>
+         <div class="ord-kpi"><div class="lb">버티는 기간 (가운데 값)</div>
+           <div class="vl">${mid ? `${Math.round(mid).toLocaleString()}<span class="u">개월</span>` : "-"}</div>
+           ${dead?`<div class="sb">최근 판매가 거의 없는 품목 ${dead.toLocaleString()}개 별도</div>`:""}</div>
+         <div class="ord-kpi"><div class="lb">재고 확인필요 — 재고가 음수</div>
+           <div class="vl" style="color:var(--muted)">${nChk.toLocaleString()}<span class="u">품목</span></div></div>`;
     }else
     $("#ordKpis").innerHTML=
       `<div class="ord-kpi"><div class="lb">위험 — 지금 발주해도 입고 전 품절</div>
