@@ -219,7 +219,8 @@
   .ord-info{border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:11.5px; font-weight:700;
             padding:3px 10px; border-radius:999px; cursor:pointer; margin-left:8px; vertical-align:middle}
   .ord-info:hover, .ord-info.on{color:var(--ink); border-color:var(--ink)}
-  .ord-tabs{display:flex; gap:6px; margin:0 0 10px; flex-wrap:wrap}
+  .ord-kpi.has-tab{position:relative; padding-bottom:13px}
+  .ord-tabs{position:absolute; right:12px; bottom:11px}
   .ord-tabs button{border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:13px; font-weight:800;
                    padding:7px 14px; border-radius:9px; cursor:pointer}
   .ord-tabs button .c{display:inline-block; margin-left:6px; font-size:11.5px; padding:0 7px; border-radius:999px; background:var(--surface-2)}
@@ -1327,10 +1328,6 @@ function withPo_(rows){
     </div>
 
     <div class="ord-kpis" id="ordKpis"></div>
-    <div class="ord-tabs" id="ordTabs" hidden>
-      <button type="button" data-t="prod" class="on">제품 · 상품<span class="c" id="ordTabP"></span></button>
-      <button type="button" data-t="part">제품과 상관없이 부족한 부품<span class="c" id="ordTabO"></span></button>
-    </div>
 
     <div class="ord-wrap">
       <table class="ord-tb" id="ordTable"><thead></thead><tbody></tbody></table>
@@ -3018,9 +3015,9 @@ function withPo_(rows){
     const lvOk=r=> mode==="red" ? r.lvl===1 : true;
     const gs=groups.filter(g=>lvOk(g.p) && (hit(g.p.code+" "+g.p.name) || g.kids.some(k=>hit(k.code+" "+k.name))));
     const os=others.filter(r=>lvOk(r) && hit(r.code+" "+r.name));
-    const tabs=$("#ordTabs"); tabs.hidden=false;
-    $("#ordTabP").textContent=gs.length.toLocaleString(); $("#ordTabO").textContent=os.length.toLocaleString();
-    tabs.querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.t===ordTab));
+    const tP=$("#ordTabP"), tO=$("#ordTabO");
+    if(tP) tP.textContent=gs.length.toLocaleString();
+    if(tO) tO.textContent=os.length.toLocaleString();
     const showP=ordTab==="prod";
     $("#ordTable thead").innerHTML =
       `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
@@ -3123,11 +3120,12 @@ function withPo_(rows){
       g.others.forEach(r=>{ if(r.kind!=="[반제품]") buy[r.code]=(buy[r.code]||0)+r.short; });
       const nMake=g.groups.filter(x=>x.p.kind==="[제품]" && x.bomKnown).length + g.others.filter(r=>r.kind==="[반제품]").length;
       const nBuy=Object.keys(buy).length, qBuy=Object.values(buy).reduce((a,b)=>a+b,0);
+      const tab=(t, label, id)=>`<div class="ord-tabs"><button type="button" data-t="${t}" class="${ordTab===t?"on":""}">${label}<span class="c" id="${id}"></span></button></div>`;
       $("#ordKpis").innerHTML=
-        `<div class="ord-kpi"><div class="lb">생산 필요 — 제품 · 반제품</div>
-           <div class="vl" style="color:#2563eb">${nMake.toLocaleString()}<span class="u">품목</span></div></div>
-         <div class="ord-kpi"><div class="lb">발주 필요 — 상품 · 모자라는 부품</div>
-           <div class="vl" style="color:var(--risk-2)">${nBuy.toLocaleString()}<span class="u">품목</span></div></div>
+        `<div class="ord-kpi has-tab"><div class="lb">생산 필요 — 제품 · 반제품</div>
+           <div class="vl" style="color:#2563eb">${nMake.toLocaleString()}<span class="u">품목</span></div>${tab("prod","제품 · 상품","ordTabP")}</div>
+         <div class="ord-kpi has-tab"><div class="lb">발주 필요 — 상품 · 모자라는 부품</div>
+           <div class="vl" style="color:var(--risk-2)">${nBuy.toLocaleString()}<span class="u">품목</span></div>${tab("part","제품과 상관없이 부족한 부품","ordTabO")}</div>
          <div class="ord-kpi"><div class="lb">발주 수량 합계</div>
            <div class="vl">${Math.round(qBuy).toLocaleString()}<span class="u">개</span></div></div>
          <div class="ord-kpi"><div class="lb">과재고 · 재고 확인필요</div>
@@ -3162,7 +3160,6 @@ function withPo_(rows){
       ordCount();
       return;
     }
-    $("#ordTabs").hidden=true;
     $("#ordTable thead").innerHTML =
       `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
        <th style="width:130px">품목코드</th><th style="width:30%;min-width:240px">품명</th><th style="width:80px">품목구분</th>
@@ -3477,7 +3474,7 @@ function withPo_(rows){
     const n=$("#ordNote"), b=$("#ordInfo"); n.hidden=!n.hidden;
     b.classList.toggle("on", !n.hidden); b.textContent=n.hidden?"ⓘ 계산 기준 보기":"ⓘ 계산 기준 닫기";
   };
-  $("#ordTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{ ordTab=b.dataset.t; renderOrder(); });
+  $("#ordKpis").addEventListener("click", e=>{ const b=e.target.closest(".ord-tabs button"); if(b){ ordTab=b.dataset.t; renderOrder(); } });
 
   $("#ordCsv").onclick=()=>{
     const list=ordFiltered(ordRows());
