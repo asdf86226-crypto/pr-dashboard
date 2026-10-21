@@ -210,6 +210,16 @@
   .pick-sum b{color:var(--ink); font-variant-numeric:tabular-nums}
   .ord-wrap{overflow:auto; max-height:62vh; border:1px solid var(--border); border-radius:10px}
   .ord-empty{padding:34px 16px; text-align:center; color:var(--muted); font-size:13.5px}
+  /* 제품 기준 보기 */
+  .ord-tb tr.og-p td{cursor:pointer}
+  .ord-tb tr.og-p .car{display:inline-block; width:14px; color:var(--muted); font-size:11px}
+  .ord-tb tr.og-c td{background:var(--surface-2); font-size:12.5px; padding-top:6px; padding-bottom:6px}
+  .ord-tb tr.og-c td.ind{padding-left:30px}
+  .ord-tb tr.og-sec td{background:var(--accent-soft); font-weight:800; font-size:12.5px; color:var(--ink)}
+  .og-tag{display:inline-block; font-size:10.5px; font-weight:800; padding:1px 7px; border-radius:999px; margin-right:6px; white-space:nowrap}
+  .og-tag.make{background:color-mix(in srgb,#2563eb 14%,transparent); color:#2563eb}
+  .og-tag.buy{background:color-mix(in srgb,var(--risk-2) 16%,transparent); color:var(--risk-2)}
+  .og-tag.ok{background:color-mix(in srgb,var(--risk-3) 14%,transparent); color:var(--risk-3)}
   .ord-lv{font-weight:800; white-space:nowrap}
   .ord-pick{display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;
             margin-top:12px; padding:12px 14px; border:1px solid var(--border);
@@ -1284,6 +1294,11 @@ function withPo_(rows){
     <p class="ord-note" id="ordNote"></p>
 
     <div class="ord-ctl">
+      <div class="f"><label>묶어 보기</label>
+        <select id="ordGroup">
+          <option value="prod">제품 기준 (부품은 펼쳐서)</option>
+          <option value="flat">품목 전체</option>
+        </select></div>
       <div class="f"><label>보기</label>
         <select id="ordRisk">
           <option value="risk">위험 + 발주 시점</option>
@@ -1689,6 +1704,7 @@ function withPo_(rows){
       const p2=n=>String(n).padStart(2,"0");
       built.stockAt=`${newest.getFullYear()}-${p2(newest.getMonth()+1)}-${p2(newest.getDate())} ${p2(newest.getHours())}:${p2(newest.getMinutes())}`;
       built.src="sp"; built.bomNote=bomNote; built.calc=ERP_CALC;
+      ordSetBom(built._bom);
       if(orders.files) built.orderNote=`주문서 ${orders.files}개 · 미출고 주문 ${Object.keys(orders.open).length.toLocaleString()}품목 · OEM 거래처 ${orders.cust.size}곳`
         + (orders.late?` · 납기 ${ORD_GRACE}일 넘게 지난 진행중 ${orders.late}건은 이미 나간 것으로 제외`:"");
       erp=built; saveErpLocal(built);
@@ -2133,7 +2149,10 @@ function withPo_(rows){
     log(`\n✓ 완료 — 품목 ${n.toLocaleString()}개 · 재고 ${Object.keys(stock).length.toLocaleString()}개 · `
       + `직접판매 ${Object.keys(ds).length.toLocaleString()}개 · BOM전개 ${Object.keys(db).length.toLocaleString()}개`);
     if(both) log(`  · 직접 판매 + 생산 투입이 겹치는 품목 ${both.toLocaleString()}개는 두 수요를 합산했습니다`);
-    return { updatedAt:todayISO(), months, n, items, nBom };
+    const res={ updatedAt:todayISO(), months, n, items, nBom };
+    // BOM 구조는 저장 용량이 커서 erp 데이터(localStorage)에 넣지 않고 따로 둔다 (발주 필요 '제품 기준' 보기용)
+    Object.defineProperty(res, "_bom", {value:bom, enumerable:false});
+    return res;
   }
 
   /* ---------- 조회 ---------- */
@@ -2914,6 +2933,133 @@ function withPo_(rows){
   const ORDLV=["확인필요","위험","발주 시점","적정","과재고"];
   const ORDCOLOR=["var(--muted)","var(--risk-1)","var(--risk-2)","var(--risk-3)","#7c3aed"];
 
+  /* ---------- 제품 기준 보기 ----------
+   * 제품 판매를 BOM 으로 역산하면 제품이 부족할 때 그 부품도 같이 '부족'으로 떠 목록이 길어진다.
+   * 그래서 제품·상품만 위에 올리고, 제품은 '발주 제안 수량만큼 만들 때 모자라는 부품'을 펼쳐 보여준다.
+   * 부품 재고는 급한 제품부터 차례로 나눠 쓴다(여러 제품에 같이 쓰는 부품도 합쳐서 판단).
+   * 반제품은 재고가 있으면 먼저 쓰고, 모자라는 만큼만 그 아래 부품으로 내려간다.
+   * 제품과 상관없이 부족한 부품(A/S 판매 · 앞으로 쓸 양 기준)은 맨 아래 따로 모은다. */
+  let ordBom=null;
+  function ordSetBom(b){
+    if(!b) return;
+    ordBom=b;
+    salKv("readwrite", st=>st.put(b, "bom")).catch(e=>console.warn("[발주 필요] BOM 저장 실패", e));
+  }
+  async function ordLoadBom(){
+    if(ordBom) return;
+    try{ const b=await salKv("readonly", st=>st.get("bom")); if(b){ ordBom=b; if(ordPage) renderOrder(); } }catch(e){}
+  }
+  const ordIsTop=k=>k==="[제품]"||k==="[상품]";
+  function ordGroups(rows){
+    const by={}; rows.forEach(r=>by[r.code]=r);
+    const pool={};                                   // 부품별 아직 안 쓴 재고 (재고 − 확정 주문)
+    const avail=c=>{ if(pool[c]==null){ const it=erp.items[c]; pool[c]=it&&it.s!=null ? Math.max(0,(+it.s||0)-(+it.oc||0)) : 0; } return pool[c]; };
+    const stop=c=>{ const k=(erp.items[c]||{}).k; return k==="[원재료]"||k==="[상품]"; };
+    const tops=rows.filter(r=>ordIsTop(r.kind) && (r.lvl===1||r.lvl===2));
+    const covered=new Set();
+    const groups=tops.map(p=>{
+      const kids={};                                 // 부품 코드 → {need, use, short}
+      if(p.kind==="[제품]" && ordBom && ordBom[p.code] && p.short>0){
+        let budget=20000;
+        (function need(code, qty, depth){
+          const list=ordBom[code]||[];
+          for(const [c, per] of list){
+            if(--budget<0 || depth>10) return;
+            const q=qty*per; if(!(q>0)) continue;
+            const take=Math.min(avail(c), q); pool[c]-=take;
+            const left=q-take;
+            const k=(kids[c]=kids[c]||{need:0, use:0, short:0, depth});
+            k.need+=q; k.use+=take;
+            if(left<=0) continue;
+            if(ordBom[c] && !stop(c)) need(c, left, depth+1);   // 반제품 — 모자라는 만큼 그 아래로
+            else k.short+=left;
+          }
+        })(p.code, p.short, 0);
+      }
+      Object.keys(kids).forEach(c=>covered.add(c));   // 이 제품 BOM 에 들어가는 부품은 아래 '따로 부족한 부품'에서 뺀다
+      const shortKids=Object.keys(kids).filter(c=>kids[c].short>0.5).map(c=>{
+        const it=erp.items[c]||{};
+        return {code:c, name:it.n||"", kind:it.k||"", need:Math.round(kids[c].need), use:Math.round(kids[c].use),
+                short:Math.ceil(kids[c].short), depth:kids[c].depth};
+      }).sort((a,b)=>b.short-a.short);
+      return {p, kids:shortKids, bomKnown: !!(ordBom && ordBom[p.code])};
+    });
+    // 위에 올라온 제품의 BOM 에 들어가는 부품은 그 제품 아래에서 판단했으므로 빼고, 나머지만 모은다
+    const others=rows.filter(r=>!ordIsTop(r.kind) && (r.lvl===1||r.lvl===2) && !covered.has(r.code));
+    return {groups, others};
+  }
+  function renderOrderGrouped(rows){
+    const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
+    const mode=($("#ordRisk")||{}).value||"risk";
+    const {groups, others}=ordGroups(rows);
+    const hit=t=>!q || t.toLowerCase().includes(q);
+    const lvOk=r=> mode==="red" ? r.lvl===1 : true;
+    const gs=groups.filter(g=>lvOk(g.p) && (hit(g.p.code+" "+g.p.name) || g.kids.some(k=>hit(k.code+" "+k.name))));
+    const os=others.filter(r=>lvOk(r) && hit(r.code+" "+r.name));
+    $("#ordTable thead").innerHTML =
+      `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
+       <th style="width:150px">품목코드</th><th style="width:34%;min-width:240px">품명</th><th style="width:80px">품목구분</th>
+       <th>해야 할 일</th><th class="num">재고</th><th class="num">월 예측</th><th class="num">확정 주문</th>
+       <th class="num">소진 예상</th><th class="num" title="제품: 만들 수량 · 부품: 이 제품 몫으로 모자라는 수량">수량</th></tr>`;
+    if(!gs.length && !os.length){
+      $("#ordTable tbody").innerHTML=`<tr><td colspan="10"><div class="ord-empty">${erp?"해당하는 품목이 없습니다 👍":"ERP 데이터를 먼저 불러와 주세요"}</div></td></tr>`;
+      return;
+    }
+    const chk=(code, qty)=>`<input type="checkbox" class="ordChk" data-code="${esc(code)}" data-qty="${qty}">`;
+    const cov=r=>`<span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${r.lvl===0?ORDLV[0]:(!isFinite(r.cover)?"-":r.cover.toFixed(1)+"개월")}</span>`;
+    let html="";
+    gs.slice(0,300).forEach((g,gi)=>{
+      const p=g.p, make=p.kind==="[제품]";
+      const todo = make
+        ? `<span class="og-tag make">생산 필요</span>${g.kids.length?`<span style="color:var(--risk-2);font-weight:700">부족 부품 ${g.kids.length}개</span>`:(g.bomKnown?`<span class="og-tag ok">부품 충분</span>`:`<span style="color:var(--muted)">BOM 없음</span>`)}`
+        : `<span class="og-tag buy">발주 필요</span>`;
+      html+=`<tr class="og-p ${p.lvl===1?"red":""}" data-g="${gi}">
+        <td>${make?"":chk(p.code, p.short)}</td>
+        <td class="mono"><span class="car">${g.kids.length?"▸":""}</span>${esc(p.code)}</td>
+        <td>${esc(p.name)}</td>
+        <td style="white-space:nowrap;color:var(--muted)">${esc(p.kind)}</td>
+        <td style="white-space:nowrap">${todo}</td>
+        <td class="num">${p.stock.toLocaleString()}</td>
+        <td class="num">${p.per.toLocaleString()}</td>
+        <td class="num">${p.oc?`<b>${p.oc.toLocaleString()}</b>`:"-"}</td>
+        <td class="num">${cov(p)}<br><span style="font-size:10.5px;color:${ORDCOLOR[p.lvl]}">${ORDLV[p.lvl]}</span></td>
+        <td class="num short">${p.short.toLocaleString()}</td></tr>`;
+      g.kids.forEach(k=>{
+        html+=`<tr class="og-c" data-pg="${gi}" hidden>
+          <td>${chk(k.code, k.short)}</td>
+          <td class="mono ind">${"· ".repeat(k.depth)}└ ${esc(k.code)}</td>
+          <td>${esc(k.name)}</td>
+          <td style="white-space:nowrap;color:var(--muted)">${esc(k.kind)}</td>
+          <td style="white-space:nowrap"><span class="og-tag buy">발주 필요</span><span style="color:var(--muted);font-size:11.5px">필요 ${k.need.toLocaleString()} · 재고로 ${k.use.toLocaleString()}</span></td>
+          <td class="num" colspan="4" style="color:var(--muted);font-size:11.5px">${p.short.toLocaleString()}개 만들 때 모자람</td>
+          <td class="num short">${k.short.toLocaleString()}</td></tr>`;
+      });
+    });
+    if(os.length){
+      html+=`<tr class="og-sec"><td colspan="10">위 제품들과 상관없이 부족한 부품 · 원재료 ${os.length.toLocaleString()}개 — A/S 판매나 다른 제품에 앞으로 쓸 양(재주문점) 기준</td></tr>`;
+      os.slice(0,300).forEach(r=>{
+        html+=`<tr class="${r.lvl===1?"red":""}">
+          <td>${chk(r.code, r.short)}</td>
+          <td class="mono">${esc(r.code)}</td><td>${esc(r.name)}</td>
+          <td style="white-space:nowrap;color:var(--muted)">${esc(r.kind)}</td>
+          <td style="white-space:nowrap">${r.kind==="[반제품]"?`<span class="og-tag make">생산 필요</span>`:`<span class="og-tag buy">발주 필요</span>`}</td>
+          <td class="num">${r.stock.toLocaleString()}</td><td class="num">${r.per.toLocaleString()}</td>
+          <td class="num">${r.oc?`<b>${r.oc.toLocaleString()}</b>`:"-"}</td>
+          <td class="num">${cov(r)}<br><span style="font-size:10.5px;color:${ORDCOLOR[r.lvl]}">${ORDLV[r.lvl]}</span></td>
+          <td class="num short">${r.short.toLocaleString()}</td></tr>`;
+      });
+    }
+    $("#ordTable tbody").innerHTML=html;
+    $("#ordTable").querySelectorAll("tr.og-p").forEach(tr=>tr.onclick=e=>{
+      if(e.target.closest("input")) return;
+      const kids=$("#ordTable").querySelectorAll(`tr.og-c[data-pg="${tr.dataset.g}"]`);
+      if(!kids.length) return;
+      const open=kids[0].hidden;
+      kids.forEach(k=>k.hidden=!open);
+      const c=tr.querySelector(".car"); if(c) c.textContent=open?"▾":"▸";
+    });
+  }
+
   function renderOrder(){
     const all=ordRows();
     // 배지와 KPI 는 화면에 보이는 기준(품목구분 필터)과 같아야 혼란이 없다
@@ -2925,8 +3071,11 @@ function withPo_(rows){
     const nChk=rows.filter(r=>r.lvl===0).length;
     const nOver=rows.filter(r=>r.lvl===4).length;
 
+    // 제품 기준 보기에서는 배지도 '제품·상품 + 따로 부족한 부품' 수로 센다 (부품이 제품마다 겹쳐 세지 않게)
+    const grouped=(($("#ordGroup")||{}).value||"prod")==="prod";
+    const nBadge = grouped && erp ? (g=>g.groups.length+g.others.length)(ordGroups(rows)) : nRed+nAmb;
     const b=$("#ordBadge");
-    if(b){ b.textContent=(nRed+nAmb).toLocaleString(); b.hidden=!(nRed+nAmb); }
+    if(b){ b.textContent=nBadge.toLocaleString(); b.hidden=!nBadge; }
     if(!ordPage) return;                            // 배지만 갱신하고 끝
 
     const sel=$("#ordKind");
@@ -2938,6 +3087,24 @@ function withPo_(rows){
     const totalShort=list.reduce((s,r)=>s+r.short,0);
     const needM=Math.max(1, ordNum($("#ordNeed").value)||3);
 
+    if(grouped && erp && !["over","all","chk"].includes(($("#ordRisk")||{}).value)){
+      // 제품 기준 보기 — 만들 제품 · 살 품목(상품 + 모자라는 부품) 기준으로 센다
+      const g=ordGroups(rows), buy={};
+      g.groups.forEach(x=>{ if(x.p.kind!=="[제품]") buy[x.p.code]=(buy[x.p.code]||0)+x.p.short;
+                            x.kids.forEach(k=>buy[k.code]=(buy[k.code]||0)+k.short); });
+      g.others.forEach(r=>{ if(r.kind!=="[반제품]") buy[r.code]=(buy[r.code]||0)+r.short; });
+      const nMake=g.groups.filter(x=>x.p.kind==="[제품]").length + g.others.filter(r=>r.kind==="[반제품]").length;
+      const nBuy=Object.keys(buy).length, qBuy=Object.values(buy).reduce((a,b)=>a+b,0);
+      $("#ordKpis").innerHTML=
+        `<div class="ord-kpi"><div class="lb">생산 필요 — 제품 · 반제품</div>
+           <div class="vl" style="color:#2563eb">${nMake.toLocaleString()}<span class="u">품목</span></div></div>
+         <div class="ord-kpi"><div class="lb">발주 필요 — 상품 · 모자라는 부품</div>
+           <div class="vl" style="color:var(--risk-2)">${nBuy.toLocaleString()}<span class="u">품목</span></div></div>
+         <div class="ord-kpi"><div class="lb">발주 수량 합계</div>
+           <div class="vl">${Math.round(qBuy).toLocaleString()}<span class="u">개</span></div></div>
+         <div class="ord-kpi"><div class="lb">과재고 · 재고 확인필요</div>
+           <div class="vl"><span style="color:#7c3aed">${nOver.toLocaleString()}</span><span class="u">품목</span> · <span style="color:var(--muted)">${nChk.toLocaleString()}</span></div></div>`;
+    }else
     $("#ordKpis").innerHTML=
       `<div class="ord-kpi"><div class="lb">위험 — 지금 발주해도 입고 전 품절</div>
          <div class="vl" style="color:var(--risk-1)">${nRed.toLocaleString()}<span class="u">품목</span></div></div>
@@ -2958,6 +3125,14 @@ function withPo_(rows){
         + (kind==="-alloy"?` · <span style="color:var(--muted)">주조 투입·잉곳 ${all.filter(r=>isAlloy(r.code)).length}품목은 BOM 소요량을 믿을 수 없어 제외</span>`:"")
       : `⚠ ERP 데이터가 아직 없습니다. <b>⚙ ERP 데이터</b> 에서 먼저 불러와 주세요.`;
 
+    if((($("#ordGroup")||{}).value||"prod")==="prod" && ($("#ordRisk")||{}).value!=="over" && ($("#ordRisk")||{}).value!=="all" && ($("#ordRisk")||{}).value!=="chk"){
+      renderOrderGrouped(rows);
+      const ca=$("#ordAll");
+      if(ca) ca.onclick=()=>{ document.querySelectorAll(".ordChk").forEach(x=>x.checked=ca.checked); ordCount(); };
+      $("#ordTable").querySelectorAll(".ordChk").forEach(c=>c.onchange=ordCount);
+      ordCount();
+      return;
+    }
     $("#ordTable thead").innerHTML =
       `<tr><th style="width:34px"><input type="checkbox" id="ordAll"></th>
        <th style="width:130px">품목코드</th><th style="width:30%;min-width:240px">품명</th><th style="width:80px">품목구분</th>
@@ -3259,12 +3434,12 @@ function withPo_(rows){
     salShow();
   };
   // 리드타임 · 1회 발주 개월은 이 브라우저에 기억
-  ["ordLtOv","ordLtDom","ordNeed"].forEach(id=>{
+  ["ordLtOv","ordLtDom","ordNeed","ordGroup"].forEach(id=>{
     const el=$("#"+id); if(!el) return;
     try{ const v=localStorage.getItem("ord_"+id); if(v) el.value=v; }catch(e){}
     el.addEventListener("change", ()=>{ try{ localStorage.setItem("ord_"+id, el.value); }catch(e){} });
   });
-  ["ordRisk","ordKind","ordLtOv","ordLtDom","ordNeed","ordSearch"].forEach(id=>{
+  ["ordRisk","ordKind","ordLtOv","ordLtDom","ordNeed","ordSearch","ordGroup"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("input", renderOrder);
   });
 
@@ -3303,10 +3478,16 @@ function withPo_(rows){
       : `<span style="color:var(--risk-1)">수량이 있는 품목이 없습니다</span>`;
   }
   function openPick(){
-    const picked=[...document.querySelectorAll(".ordChk:checked")].map(x=>x.dataset.code);
-    if(!picked.length){ toast("담을 품목을 선택하세요"); return; }
+    const chks=[...document.querySelectorAll(".ordChk:checked")];
+    if(!chks.length){ toast("담을 품목을 선택하세요"); return; }
     const by={}; ordRows().forEach(r=>by[r.code]=r);
-    pickRows=picked.map(c=>by[c]).filter(Boolean);
+    // 제품 기준 보기의 부품은 '이 제품 몫으로 모자라는 수량'(data-qty)을 기본값으로. 같은 부품을 여러 번 고르면 합친다
+    const want={}, order=[];
+    chks.forEach(x=>{ const c=x.dataset.code; if(!(c in want)) order.push(c); want[c]=(want[c]||0)+(x.dataset.qty!=null?+x.dataset.qty:NaN); });
+    pickRows=order.map(c=>{
+      const r=by[c] || (erp && erp.items[c] ? {code:c, name:erp.items[c].n||"", stock:Math.max(0,+erp.items[c].s||0), per:+erp.items[c].d||0, rop:0, lvl:3, cover:Infinity, short:0} : null);
+      return r && isFinite(want[c]) ? Object.assign({}, r, {short:Math.round(want[c])}) : r;
+    }).filter(Boolean);
     if(!pickRows.length){ toast("선택한 품목을 찾지 못했습니다"); return; }
     $("#ordWho").value = $("#ordWho").value || loadRequester();
     $("#ordDue").value = $("#ordDue").value || todayISO();
@@ -3486,6 +3667,7 @@ function withPo_(rows){
     try{
       const built=await erpBuild(erpPick, put);
       built.src="file";
+      ordSetBom(built._bom);
       erp=built; saveErpLocal(built);
       erpPick=[]; renderErpList();
       $("#erpClear").style.display="inline-flex";
@@ -3644,6 +3826,7 @@ function withPo_(rows){
   // 구매요청 목록 조회가 우선이므로 구글 호출은 뒤로 미루고, 조회가 성공했을 때만 시도한다.
   (async function(){
     erp=loadErpLocal();
+    ordLoadBom();
     // 예전 구글 시트 계산 결과(src 없음)는 더 이상 갱신되지 않아 버린다 — 쉐어포인트(sp)·직접 올리기(file)만 쓴다
     if(erp && erp.src!=="sp" && erp.src!=="file"){ erp=null; try{ localStorage.removeItem(ERPKEY); }catch(e){} }
     renderErpPanel(); renderTable(); renderOrder();
