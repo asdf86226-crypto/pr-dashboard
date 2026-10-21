@@ -1655,7 +1655,7 @@ function withPo_(rows){
    * 쉐어포인트 [TADC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=6;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERP_CALC=7;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
   const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
@@ -1967,10 +1967,14 @@ function withPo_(rows){
         const hi=erpHeaderAt(rows,["생산품목코드","소모품목코드"]), m=erpCols(rows,hi);
         const cP=m["생산품목코드"], cC=m["소모품목코드"], cPn=m["생산품목명"], cCn=m["소모품목명"],
               cMake=erpCol(m,["생산수량"]), cUse=erpCol(m,["소요량"]);
-        let n=0, dup=0;
+        let n=0, dup=0, lastP="";
         for(let i=hi+1;i<rows.length;i++){
           const r=rows[i]||[];
-          const p=erpNorm(r[cP]), c=erpNorm(r[cC]);
+          // 이카운트 BOM현황은 생산품목코드 칸이 병합돼 첫 줄에만 코드가 있고 아래 줄은 빈 칸으로 나올 수 있다
+          // — 빈 칸이면 바로 위 생산품목을 이어받는다
+          const pRaw=erpNorm(r[cP]), c=erpNorm(r[cC]);
+          if(pRaw) lastP=pRaw;
+          const p=pRaw || (c ? lastP : "");
           if(!p||!c) continue;
           const make=erpNum(r[cMake])||1, use=erpNum(r[cUse]);
           if(!use) continue;
@@ -3121,6 +3125,7 @@ function withPo_(rows){
       ? `판단 가능한 <b>${rows.length.toLocaleString()}품목</b> 기준 · <b>재주문점 = 월 예측 × 리드타임 + 안전재고</b>, 안전재고 = Z × 월 변동 × √리드타임`
         + ` · <b>판매 유형</b>: 많이 팔리고 꾸준한 품목은 안전재고를 넉넉히(품절 확률 3%), 적게·가끔 팔리는 품목은 최소로(긴급 보충으로 대응)`
         + ` · 월 예측은 최근 달에 무게를 둔 12개월 가중평균(대량 거래 달 보정) · 리드타임은 발주현황에 국내 발주 이력이 있으면 국내, 아니면 해외`
+        + (grouped?` · <span style="color:var(--muted)">BOM 구조 ${ordBom?`제품 ${Object.keys(ordBom).length.toLocaleString()}개 불러옴`:"아직 없음"}</span>`:"")
         + (erp.orderNote?` · <b>확정 주문</b>: ${esc(erp.orderNote)} — OEM 거래처 판매는 월 예측에서 빼고 미출고 주문을 더함`:` · <span style="color:var(--muted)">주문서현황이 아직 없어 확정 주문은 반영되지 않았습니다</span>`)
         + (erp.stockAt?` · 재고 ${esc(String(erp.stockAt).slice(5,16))}`:"")
         + (nChk?` · <span style="color:var(--muted)">재고가 음수인 ${nChk}품목은 마감 전 조정 수치로 보고 맨 뒤로 뺐습니다</span>`:"")
