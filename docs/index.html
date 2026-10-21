@@ -2989,6 +2989,7 @@ function withPo_(rows){
     return {groups, others};
   }
   function renderOrderGrouped(rows){
+    if(!ordBom) ordLoadBom();
     const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
     const mode=($("#ordRisk")||{}).value||"risk";
     const {groups, others}=ordGroups(rows);
@@ -3007,12 +3008,13 @@ function withPo_(rows){
     }
     const chk=(code, qty)=>`<input type="checkbox" class="ordChk" data-code="${esc(code)}" data-qty="${qty}">`;
     const cov=r=>`<span class="ord-lv" style="color:${ORDCOLOR[r.lvl]}">${r.lvl===0?ORDLV[0]:(!isFinite(r.cover)?"-":r.cover.toFixed(1)+"개월")}</span>`;
-    let html="";
+    let html = ordBom ? "" : `<tr class="og-sec"><td colspan="10">⚠ BOM 구조를 아직 불러오지 못해 제품 아래 부품을 펼칠 수 없습니다 — <b>⚙ ERP 데이터 → ⟳ 지금 다시 받기</b>를 한 번 눌러 주세요</td></tr>`;
     gs.slice(0,300).forEach((g,gi)=>{
-      const p=g.p, make=p.kind==="[제품]";
+      // BOM 이 있는 제품만 '생산'. BOM 이 없는 [제품]은 완제품으로 사 오는 품목으로 보고 발주 대상
+      const p=g.p, make=p.kind==="[제품]" && g.bomKnown;
       const todo = make
-        ? `<span class="og-tag make">생산 필요</span>${g.kids.length?`<span style="color:var(--risk-2);font-weight:700">부족 부품 ${g.kids.length}개</span>`:(g.bomKnown?`<span class="og-tag ok">부품 충분</span>`:`<span style="color:var(--muted)">BOM 없음</span>`)}`
-        : `<span class="og-tag buy">발주 필요</span>`;
+        ? `<span class="og-tag make">생산 필요</span>${g.kids.length?`<span style="color:var(--risk-2);font-weight:700">부족 부품 ${g.kids.length}개</span>`:`<span class="og-tag ok">부품 충분</span>`}`
+        : `<span class="og-tag buy">발주 필요</span>${p.kind==="[제품]"?`<span style="color:var(--muted);font-size:11.5px" title="BOM 에 등록된 부품이 없어 완제품으로 사 오는 품목으로 봅니다">BOM 없음</span>`:""}`;
       html+=`<tr class="og-p ${p.lvl===1?"red":""}" data-g="${gi}">
         <td>${make?"":chk(p.code, p.short)}</td>
         <td class="mono"><span class="car">${g.kids.length?"▸":""}</span>${esc(p.code)}</td>
@@ -3090,10 +3092,10 @@ function withPo_(rows){
     if(grouped && erp && !["over","all","chk"].includes(($("#ordRisk")||{}).value)){
       // 제품 기준 보기 — 만들 제품 · 살 품목(상품 + 모자라는 부품) 기준으로 센다
       const g=ordGroups(rows), buy={};
-      g.groups.forEach(x=>{ if(x.p.kind!=="[제품]") buy[x.p.code]=(buy[x.p.code]||0)+x.p.short;
+      g.groups.forEach(x=>{ if(!(x.p.kind==="[제품]" && x.bomKnown)) buy[x.p.code]=(buy[x.p.code]||0)+x.p.short;
                             x.kids.forEach(k=>buy[k.code]=(buy[k.code]||0)+k.short); });
       g.others.forEach(r=>{ if(r.kind!=="[반제품]") buy[r.code]=(buy[r.code]||0)+r.short; });
-      const nMake=g.groups.filter(x=>x.p.kind==="[제품]").length + g.others.filter(r=>r.kind==="[반제품]").length;
+      const nMake=g.groups.filter(x=>x.p.kind==="[제품]" && x.bomKnown).length + g.others.filter(r=>r.kind==="[반제품]").length;
       const nBuy=Object.keys(buy).length, qBuy=Object.values(buy).reduce((a,b)=>a+b,0);
       $("#ordKpis").innerHTML=
         `<div class="ord-kpi"><div class="lb">생산 필요 — 제품 · 반제품</div>
