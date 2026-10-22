@@ -1699,8 +1699,12 @@ function withPo_(rows){
    * 쉐어포인트 [TDC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=9;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
-  const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
+  const ERP_CALC=10;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERPSP_REPORTS=["품목정보","창고별재고현황","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
+  // 재고는 창고별재고현황으로 계산한다 — 불량창고(창고명에 '불량')에 있는 수량은 쓸 수 없어 뺀다.
+  // 창고별 파일이 없는 회사만 예전처럼 재고현황(전체 합계)을 쓴다.
+  const STOCK_REPS=["창고별재고현황","재고현황"];
+  const BAD_WH=/불량/;
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
   function erpSpSave(o){ try{ o ? localStorage.setItem(ERPSPKEY, JSON.stringify(o)) : localStorage.removeItem(ERPSPKEY); }catch(e){} }
@@ -1720,7 +1724,10 @@ function withPo_(rows){
         try{ metas.push({co, rep, path, meta: await MmsSp.meta(path, false)}); }
         catch(e){ if(e.status===404) continue; throw e; }   // 판매현황을 받지 않는 회사 등은 건너뛴다
       }
-      if(!metas.some(m=>m.rep==="재고현황")) throw new Error("쉐어포인트 MMS 폴더에서 재고현황 파일을 찾지 못했습니다");
+      // 같은 회사에 창고별재고현황이 있으면 재고현황은 쓰지 않는다 (두 번 더해지지 않게)
+      for(let i=metas.length-1;i>=0;i--){ const m=metas[i];
+        if(m.rep==="재고현황" && metas.some(x=>x.co===m.co && x.rep==="창고별재고현황")) metas.splice(i,1); }
+      if(!metas.some(m=>STOCK_REPS.includes(m.rep))) throw new Error("쉐어포인트 MMS 폴더에서 재고현황 파일을 찾지 못했습니다");
       const spBom=metas.filter(m=>m.rep==="BOM");
       const sig=JSON.stringify([metas.map(m=>m.meta.eTag)]);
       const st=erpSpState()||{};
@@ -1744,7 +1751,7 @@ function withPo_(rows){
         bomNote=!built.nBom ? "⚠ 쉐어포인트 BOM 파일에서 BOM 표(생산품목코드 · 소모품목코드)를 찾지 못했습니다"
           : `BOM ${built.nBom.toLocaleString()}건 (쉐어포인트 ${spBom.map(m=>m.co).join("·")} · ${p2(at.getMonth()+1)}-${p2(at.getDate())} ${p2(at.getHours())}:${p2(at.getMinutes())} 기준)`;
       }
-      const newest=metas.filter(m=>m.rep==="재고현황").map(m=>new Date(m.meta.lastModifiedDateTime)).sort((a,b)=>b-a)[0];
+      const newest=metas.filter(m=>STOCK_REPS.includes(m.rep)).map(m=>new Date(m.meta.lastModifiedDateTime)).sort((a,b)=>b-a)[0];
       const p2=n=>String(n).padStart(2,"0");
       built.stockAt=`${newest.getFullYear()}-${p2(newest.getMonth()+1)}-${p2(newest.getDate())} ${p2(newest.getHours())}:${p2(newest.getMinutes())}`;
       built.src="sp"; built.bomNote=bomNote; built.calc=ERP_CALC;
@@ -1754,7 +1761,7 @@ function withPo_(rows){
         + (orders.late?` · 납기 ${ORD_GRACE}일 넘게 지난 진행중 ${orders.late}건은 이미 나간 것으로 제외`:"");
       erp=built; saveErpLocal(built);
       erpSpSave({on:true, sig, at:Date.now()});
-      erpSpMsg=`✅ 재고 ${built.stockAt} 기준 · 품목 ${(built.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${bomNote}`;
+      erpSpMsg=`✅ 재고 ${built.stockAt} 기준${built.badWh?" (불량창고 제외)":""} · 품목 ${(built.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${bomNote}`;
       console.log("[ERP] 쉐어포인트 계산\n"+lines.join("\n"));
       return true;
     }catch(e){
@@ -1768,7 +1775,7 @@ function withPo_(rows){
   // 이번에 다시 계산하지 않았어도(파일 그대로) 지금 쓰는 자료가 무엇인지 보이게 한다
   function erpSpSummary(){
     if(!(erp && erp.src==="sp")) return "열 때마다 바뀐 파일이 있으면 다시 계산합니다.";
-    return `재고 ${erp.stockAt||"–"} 기준 · 품목 ${(erp.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${erp.bomNote||"BOM 없음"}`
+    return `재고 ${erp.stockAt||"–"} 기준${erp.badWh?" (불량창고 제외)":""} · 품목 ${(erp.n||0).toLocaleString()}개 · 판매 최근 12개월 · ${erp.bomNote||"BOM 없음"}`
       +" — 바뀐 파일이 있으면 열 때 다시 계산합니다.";
   }
   function renderErpSp(){
@@ -2002,7 +2009,7 @@ function withPo_(rows){
     let cutYM="";
     if(opts.lastMonths){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-(opts.lastMonths-1));
       cutYM=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
-    const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={}, buy={};
+    const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={}, buy={}, badWh={};
     // 구매처(재고현황 · 품목정보의 '구매처명') — 발주 필요에서 거래처로 찾을 때 쓴다. 두 회사가 다르면 둘 다 둔다
     const addBuy=(c,v)=>{ v=erpNorm(v); if(!v) return; const a=(buy[c]=buy[c]||[]); if(a.indexOf(v)<0) a.push(v); };
     // 안전재고 계산용 월별 수요 — 지난달부터 거꾸로 12개월(이번 달은 아직 덜 끝나 뺀다). 0 = 지난달
@@ -2053,12 +2060,15 @@ function withPo_(rows){
         const hi=erpHeaderAt(rows,["품목코드","재고수량"]), m=erpCols(rows,hi);
         const cCode=m["품목코드"], cQty=m["재고수량"],
               cName=erpCol(m,["품명및규격","품목명[규격]","품목명","품명","품목명규격"]),
-              cKind=erpCol(m,["품목구분"]), cBuy=erpCol(m,["구매처명","구매처"]);
+              cKind=erpCol(m,["품목구분"]), cBuy=erpCol(m,["구매처명","구매처"]),
+              cWh=erpCol(m,["창고명","창고"]);
         let n=0;
         for(let i=hi+1;i<rows.length;i++){
           const r=rows[i]||[]; const c=erpNorm(r[cCode]);
           if(!c || /^합\s*계$/.test(c)) continue;
-          stock[c]=(stock[c]||0)+erpNum(r[cQty]);      // 두 회사 재고는 합산
+          const wh=cWh!=null?erpNorm(r[cWh]):"";
+          if(wh && BAD_WH.test(wh)){ const q=erpNum(r[cQty]); badWh[wh]=(badWh[wh]||0)+q; if(stock[c]==null) stock[c]=0; }   // 불량창고 수량은 빼고, 품목은 남긴다
+          else stock[c]=(stock[c]||0)+erpNum(r[cQty]);      // 두 회사 · 여러 창고 재고는 합산
           const nm=cName!=null?erpNorm(r[cName]):"";
           if(nm && !name[c]) name[c]=nm;
           const kd=cKind!=null?erpBracket(r[cKind]):"";   // '원재료' → '[원재료]' (BOM 전개 멈춤 기준과 같은 모양)
@@ -2219,6 +2229,8 @@ function withPo_(rows){
       + `직접판매 ${Object.keys(ds).length.toLocaleString()}개 · BOM전개 ${Object.keys(db).length.toLocaleString()}개`);
     if(both) log(`  · 직접 판매 + 생산 투입이 겹치는 품목 ${both.toLocaleString()}개는 두 수요를 합산했습니다`);
     const res={ updatedAt:todayISO(), months, n, items, nBom };
+    const bw=Object.keys(badWh);
+    if(bw.length){ res.badWh=bw; log(`  불량창고 재고 제외: ${bw.map(w=>w+" "+Math.round(badWh[w]).toLocaleString()).join(" · ")}`); }
     // BOM 구조는 저장 용량이 커서 erp 데이터(localStorage)에 넣지 않고 따로 둔다 (발주 필요 '제품 기준' 보기용)
     Object.defineProperty(res, "_bom", {value:bom, enumerable:false});
     return res;
