@@ -164,6 +164,12 @@
   .sal-bars .b .tip{display:none; position:absolute; bottom:calc(100% + 4px); left:50%; transform:translateX(-50%); background:var(--ink); color:var(--surface);
     font-size:11px; font-weight:700; padding:4px 7px; border-radius:5px; white-space:nowrap; z-index:2; pointer-events:none}
   .sal-bars .b:hover .tip{display:block}
+  /* 업체별 수량 — 양 끝 막대는 말풍선이 화면 밖으로 나가지 않게 한쪽으로 붙인다 */
+  .sal-bars .b .tip.l{left:0; transform:none} .sal-bars .b .tip.r{left:auto; right:0; transform:none}
+  .sal-bars .b .tip .h{display:block; padding-bottom:3px; margin-bottom:3px; border-bottom:1px solid color-mix(in srgb,var(--surface) 25%,transparent)}
+  .sal-bars .b .tip .row{display:flex; gap:14px; justify-content:space-between; font-weight:600}
+  .sal-bars .b .tip .row b{font-variant-numeric:tabular-nums}
+  .sal-bars .b .tip .more{display:block; font-weight:600; opacity:.7; margin-top:2px}
   .sal-xl{display:flex; gap:2px; margin-top:4px}
   .sal-xl span{flex:1; text-align:center; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden}
   .sal-web{flex:0 1 auto; border-left:1px solid var(--border); padding-left:16px; align-self:stretch; display:flex; flex-direction:column}
@@ -3470,21 +3476,31 @@ function withPo_(rows){
   // 조회 기간의 월별 판매량 막대 (내부이동 제외). 기간이 길면 끝에서 24개월만.
   function salMonthly(it, from, to){
     const ym=n=>Math.floor(n/100), fy=Math.floor(from/10000), fm=Math.floor(from/100)%100;
+    const fmt=v=>(Math.round(v*100)/100).toLocaleString();
     const months=[]; let y=fy, m=fm;
     while(y*100+m<=ym(to)){ months.push(y*100+m); m++; if(m>12){ m=1; y++; } }
-    const shown=months.slice(-24), sum={};
-    for(let i=0;i<it.d.length;i++){ const d=it.d[i]; if(d<from||d>to||it.f[i]>=2) continue; const k=ym(d); sum[k]=(sum[k]||0)+it.q[i]; }
+    const shown=months.slice(-24), sum={}, byV={};
+    for(let i=0;i<it.d.length;i++){ const d=it.d[i]; if(d<from||d>to||it.f[i]>=2) continue; const k=ym(d); sum[k]=(sum[k]||0)+it.q[i];
+      if(it.v){ const o=(byV[k]=byV[k]||{}); o[it.v[i]]=(o[it.v[i]]||0)+it.q[i]; } }
+    const names=(salMeta && salMeta.cust) || [], TOPV=8;
+    // 그 달 업체별 수량 (많은 순, 반품으로 0 이하인 곳은 뺀다)
+    const custTip=k=>{
+      const list=Object.keys(byV[k]||{}).map(v=>({n:names[v]||"-", q:byV[k][v]})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q);
+      if(!list.length) return "";
+      return list.slice(0,TOPV).map(x=>`<span class="row"><span>${esc(x.n)}</span><b>${fmt(x.q)}</b></span>`).join("")
+        + (list.length>TOPV?`<span class="more">외 ${list.length-TOPV}곳 ${fmt(list.slice(TOPV).reduce((s,x)=>s+x.q,0))}개</span>`:"");
+    };
     const vals=shown.map(k=>Math.max(0,sum[k]||0)), max=Math.max(...vals,0);
     if(!shown.length) return "";
-    const fmt=v=>(Math.round(v*100)/100).toLocaleString(), imax=vals.indexOf(max);
+    const imax=vals.indexOf(max);
     const step=shown.length>18?3:(shown.length>12?2:1);
     const bars=shown.map((k,i)=>{ const h=max>0?vals[i]/max*100:0;
       return `<div class="b"><i style="height:${h.toFixed(1)}%"></i>${i===imax&&max>0?`<span class="v" style="bottom:calc(${h.toFixed(1)}% + 2px)">${fmt(max)}</span>`:""}`
-        + `<span class="tip">${String(k).slice(0,4)}.${String(k).slice(4)} · ${fmt(vals[i])}개</span></div>`; }).join("");
+        + `<span class="tip ${i<shown.length/3?"l":(i>=shown.length*2/3?"r":"")}"><span class="h">${String(k).slice(0,4)}.${String(k).slice(4)} · ${fmt(vals[i])}개</span>${custTip(k)}</span></div>`; }).join("");
     const xl=shown.map((k,i)=>{ const mm=k%100; const lab=(i%step===0||i===shown.length-1)?(mm===1||i===0?`${String(k).slice(2,4)}.${mm}`:`${mm}월`):"";
       return `<span>${lab}</span>`; }).join("");
     return `<div class="sal-mon"><div class="t">월별 판매량</div>
-      <div class="s">${months.length>24?"조회 기간 중 최근 24개월 · ":""}내부이동 제외 · 막대에 마우스를 올리면 수량</div>
+      <div class="s">${months.length>24?"조회 기간 중 최근 24개월 · ":""}내부이동 제외 · 막대에 마우스를 올리면 업체별 수량</div>
       <div class="sal-bars">${bars}</div><div class="sal-xl">${xl}</div></div>`;
   }
   function salWeb(code){
