@@ -230,6 +230,8 @@
   .ord-tb tr.og-c td{background:var(--surface-2); font-size:12.5px; padding-top:6px; padding-bottom:6px}
   .ord-tb tr.og-c td.ind{padding-left:30px}
   .ord-tb tr.og-sec td{background:var(--accent-soft); font-weight:800; font-size:12.5px; color:var(--ink)}
+  .ord-buy{font-size:11px; color:var(--muted); margin-top:2px; font-weight:600}
+  .ord-buy.hit{color:var(--accent); font-weight:800}
   .ord-info{border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:11.5px; font-weight:700;
             padding:3px 10px; border-radius:999px; cursor:pointer; margin-left:8px; vertical-align:middle}
   .ord-info:hover, .ord-info.on{color:var(--ink); border-color:var(--ink)}
@@ -1347,7 +1349,7 @@ function withPo_(rows){
       <div class="f"><label title="발주부터 입고까지 걸리는 기간">리드타임 해외(개월)</label><input id="ordLtOv" type="number" min="0.5" step="0.5" value="2" style="width:110px"></div>
       <div class="f"><label>리드타임 국내(개월)</label><input id="ordLtDom" type="number" min="0.5" step="0.5" value="1" style="width:110px"></div>
       <div class="f"><label title="한 번 발주할 때 몇 개월치를 살지">1회 발주(개월)</label><input id="ordNeed" type="number" min="1" step="1" value="3" style="width:92px"></div>
-      <div class="f grow"><label>검색</label><input id="ordSearch" placeholder="품목코드·품명"></div>
+      <div class="f grow"><label>검색</label><input id="ordSearch" placeholder="품목코드·품명·구매처"></div>
       <button class="linkbtn" id="ordCsv">⬇ CSV 내보내기</button>
     </div>
 
@@ -1696,7 +1698,7 @@ function withPo_(rows){
    * 쉐어포인트 [TDC › 문서 › MMS/<회사>] 에 올린다(BOM 은 매일 새벽 2시). 회사 계정으로 로그인해
    * 그 파일로 이 브라우저에서 계산한다. 파일이 바뀌지 않았으면(eTag 가 같으면) 다시 계산하지 않는다. */
   const ERPSPKEY="erp_sp_state";
-  const ERP_CALC=8;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
+  const ERP_CALC=9;   // 계산 방식 버전 — 바뀌면 파일이 그대로여도 다시 계산 (2: 월별 수요 · 안전재고)
   const ERPSP_REPORTS=["품목정보","재고현황","판매현황_전체","BOM","주문서현황"];   // 품목정보 먼저 — 품목구분 기준
   let erpSpBusy=false, erpSpMsg="";
   function erpSpState(){ try{ return JSON.parse(localStorage.getItem(ERPSPKEY)||"null"); }catch(e){ return null; } }
@@ -1999,7 +2001,9 @@ function withPo_(rows){
     let cutYM="";
     if(opts.lastMonths){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-(opts.lastMonths-1));
       cutYM=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
-    const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={};
+    const stock={}, name={}, kind={}, bom={}, sales={}, monthSet={}, inter={}, buy={};
+    // 구매처(재고현황 · 품목정보의 '구매처명') — 발주 필요에서 거래처로 찾을 때 쓴다. 두 회사가 다르면 둘 다 둔다
+    const addBuy=(c,v)=>{ v=erpNorm(v); if(!v) return; const a=(buy[c]=buy[c]||[]); if(a.indexOf(v)<0) a.push(v); };
     // 안전재고 계산용 월별 수요 — 지난달부터 거꾸로 12개월(이번 달은 아직 덜 끝나 뺀다). 0 = 지난달
     const MV=12, salesM={}, interM={};
     const oemCust = opts.orders && opts.orders.cust && opts.orders.cust.size ? opts.orders.cust : null;
@@ -2048,7 +2052,7 @@ function withPo_(rows){
         const hi=erpHeaderAt(rows,["품목코드","재고수량"]), m=erpCols(rows,hi);
         const cCode=m["품목코드"], cQty=m["재고수량"],
               cName=erpCol(m,["품명및규격","품목명[규격]","품목명","품명","품목명규격"]),
-              cKind=erpCol(m,["품목구분"]);
+              cKind=erpCol(m,["품목구분"]), cBuy=erpCol(m,["구매처명","구매처"]);
         let n=0;
         for(let i=hi+1;i<rows.length;i++){
           const r=rows[i]||[]; const c=erpNorm(r[cCode]);
@@ -2058,6 +2062,7 @@ function withPo_(rows){
           if(nm && !name[c]) name[c]=nm;
           const kd=cKind!=null?erpBracket(r[cKind]):"";   // '원재료' → '[원재료]' (BOM 전개 멈춤 기준과 같은 모양)
           if(kd && !kind[c]) kind[c]=kd;
+          if(cBuy!=null) addBuy(c, r[cBuy]);
           n++;
         }
         nStock+=n; log(`  재고 ${n.toLocaleString()}품목${cKind==null?" (품목구분 열 없음)":""}`);
@@ -2098,7 +2103,8 @@ function withPo_(rows){
         if(hi<0) hi=erpHeaderAt(rows,["품목코드","품구분"]);
         const m=erpCols(rows,hi);
         const cCode=m["품목코드"], cKind=erpCol(m,["품목구분","품구분","품목유형"]),
-              cName=erpCol(m,["품명및규격","품목명[규격]","품목명(규격)","품목명","품명","품목명규격"]);
+              cName=erpCol(m,["품명및규격","품목명[규격]","품목명(규격)","품목명","품명","품목명규격"]),
+              cBuy=erpCol(m,["구매처명","구매처"]);
         let n=0, nk=0;
         for(let i=hi+1;i<rows.length;i++){
           const r=rows[i]||[]; const c=erpNorm(r[cCode]);
@@ -2107,6 +2113,7 @@ function withPo_(rows){
           if(nm && !name[c]) name[c]=nm;
           const kd=erpBracket(r[cKind]);
           if(kd && !kind[c]){ kind[c]=kd; nk++; }
+          if(cBuy!=null) addBuy(c, r[cBuy]);
           n++;
         }
         nMaster+=n; log(`  기준정보 ${n.toLocaleString()}품목 (품목구분 ${nk.toLocaleString()}건)`);
@@ -2191,6 +2198,7 @@ function withPo_(rows){
       if(stock[c]!=null) it.s=Math.round(stock[c]*100)/100;
       if(oc[c]>0) it.oc=Math.round(oc[c]*10)/10;
       if(kind[c]) it.k=kind[c];
+      if(buy[c]) it.b=buy[c].join(" · ");
       if(d>0){ it.d=Math.round(d*10)/10; it.ds=Math.round(a*10)/10; it.db=Math.round(b*10)/10;
                if(iv>a+b) it.di=Math.round(iv*10)/10;
                // 월별 수요(지난달부터 12개월) — 평균을 정한 것과 같은 기준(내부이동이 크면 내부이동)으로
@@ -2973,7 +2981,7 @@ function withPo_(rows){
       const rop = f*L + ss + oc, upTo = f*(L+R) + ss + oc;
       const raw=+v.s||0, stock=Math.max(0,raw), free=stock-oc, cover = f>0 ? Math.max(0,free)/f : (free>=0?Infinity:0);
       const lvl = raw<0 ? 0 : (free < f*L || free < 0 ? 1 : (stock < rop ? 2 : (cover > Math.max(12, 2*(L+R)) ? 4 : 3)));
-      out.push({ code:c, name:v.n||"", kind:v.k||"", raw, stock, per:Math.round(f*10)/10, cover, cls, z, L, og, oc:Math.round(oc),
+      out.push({ code:c, name:v.n||"", kind:v.k||"", buy:v.b||"", raw, stock, per:Math.round(f*10)/10, cover, cls, z, L, og, oc:Math.round(oc),
                  sd:Math.round(st.sd*10)/10, ss:Math.round(ss), rop:Math.round(rop), spike:st.spike,
                  need:Math.round(upTo), short: lvl===1||lvl===2 ? Math.max(0, Math.round(upTo-stock)) : 0, lvl });
     });
@@ -2996,7 +3004,7 @@ function withPo_(rows){
       if(mode==="risk") return r.lvl===1||r.lvl===2;
       return true;
     });
-    if(q) list=list.filter(r=>(r.code+" "+r.name).toLowerCase().includes(q));
+    if(q) list=list.filter(r=>(r.code+" "+r.name+" "+r.buy).toLowerCase().includes(q));
     return list;
   }
 
@@ -3045,6 +3053,9 @@ function withPo_(rows){
     $("#ocBg").classList.add("show");
   }
 
+  // 품명 아래 작게 구매처 — 검색어가 구매처에 걸리면 눈에 띄게
+  const buyTag=r=>{ if(!r.buy) return ""; const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
+    return `<div class="ord-buy${q && r.buy.toLowerCase().includes(q) ? " hit" : ""}">${esc(r.buy)}</div>`; };
   const ORDLV=["확인필요","위험","발주 시점","적정","과재고"];
   const ORDCOLOR=["var(--muted)","var(--risk-1)","var(--risk-2)","var(--risk-3)","#7c3aed"];
 
@@ -3097,7 +3108,7 @@ function withPo_(rows){
       Object.keys(kids).forEach(c=>covered.add(c));   // 이 제품 BOM 에 들어가는 부품은 아래 '따로 부족한 부품'에서 뺀다
       const shortKids=Object.keys(kids).filter(c=>kids[c].short>0.5).map(c=>{
         const it=erp.items[c]||{};
-        return {code:c, name:it.n||"", kind:it.k||"", need:Math.round(kids[c].need), use:Math.round(kids[c].use),
+        return {code:c, name:it.n||"", kind:it.k||"", buy:it.b||"", need:Math.round(kids[c].need), use:Math.round(kids[c].use),
                 short:Math.ceil(kids[c].short), depth:kids[c].depth,
                 stock:Math.max(0, Math.round(+it.s||0)), oc:Math.round(+it.oc||0),
                 usedBefore:Math.max(0, Math.round((init[c]||0)-kids[c].before))};
@@ -3115,8 +3126,9 @@ function withPo_(rows){
     const {groups, others}=ordGroups(rows);
     const hit=t=>!q || t.toLowerCase().includes(q);
     const lvOk=r=> mode==="red" ? r.lvl===1 : true;
-    const gs=groups.filter(g=>lvOk(g.p) && (hit(g.p.code+" "+g.p.name) || g.kids.some(k=>hit(k.code+" "+k.name))));
-    const os=others.filter(r=>lvOk(r) && hit(r.code+" "+r.name));
+    const key=r=>r.code+" "+r.name+" "+(r.buy||"");        // 구매처(거래처)로도 찾는다
+    const gs=groups.filter(g=>lvOk(g.p) && (hit(key(g.p)) || g.kids.some(k=>hit(key(k)))));
+    const os=others.filter(r=>lvOk(r) && hit(key(r)));
     const tP=$("#ordTabP"), tO=$("#ordTabO");
     if(tP) tP.textContent=gs.length.toLocaleString();
     if(tO) tO.textContent=os.length.toLocaleString();
@@ -3142,7 +3154,7 @@ function withPo_(rows){
       html+=`<tr class="og-p ${p.lvl===1?"red":""}" data-g="${gi}">
         <td>${make?"":chk(p.code, p.short)}</td>
         <td class="mono"><span class="car">${g.kids.length?"▸":""}</span>${esc(p.code)}</td>
-        <td>${esc(p.name)}</td>
+        <td>${esc(p.name)}${buyTag(p)}</td>
         <td style="white-space:nowrap;color:var(--muted)">${esc(p.kind)}</td>
         <td style="white-space:nowrap">${todo}</td>
         <td class="num">${p.stock.toLocaleString()}</td>
@@ -3154,7 +3166,7 @@ function withPo_(rows){
         html+=`<tr class="og-c" data-pg="${gi}" hidden>
           <td>${chk(k.code, k.short)}</td>
           <td class="mono ind">${"· ".repeat(k.depth)}└ ${esc(k.code)}</td>
-          <td>${esc(k.name)}</td>
+          <td>${esc(k.name)}${buyTag(k)}</td>
           <td style="white-space:nowrap;color:var(--muted)">${esc(k.kind)}</td>
           <td style="white-space:nowrap"><span class="og-tag buy">발주 필요</span><span style="color:var(--muted);font-size:11.5px">필요 ${k.need.toLocaleString()} · 재고 ${k.stock.toLocaleString()}${
             k.oc?` (확정 주문 몫 ${k.oc.toLocaleString()})`:""}${
@@ -3168,7 +3180,7 @@ function withPo_(rows){
       os.slice(0,300).forEach(r=>{
         html+=`<tr class="${r.lvl===1?"red":""}">
           <td>${chk(r.code, r.short)}</td>
-          <td class="mono">${esc(r.code)}</td><td>${esc(r.name)}</td>
+          <td class="mono">${esc(r.code)}</td><td>${esc(r.name)}${buyTag(r)}</td>
           <td style="white-space:nowrap;color:var(--muted)">${esc(r.kind)}</td>
           <td style="white-space:nowrap">${r.kind==="[반제품]"?`<span class="og-tag make">생산 필요</span>`:`<span class="og-tag buy">발주 필요</span>`}</td>
           <td class="num">${r.stock.toLocaleString()}</td><td class="num">${r.per.toLocaleString()}</td>
@@ -3297,7 +3309,7 @@ function withPo_(rows){
       <tr class="${r.lvl===1?"red":""}">
         <td><input type="checkbox" class="ordChk" data-code="${esc(r.code)}"></td>
         <td class="mono">${esc(r.code)}</td>
-        <td>${esc(r.name)}</td>
+        <td>${esc(r.name)}${buyTag(r)}</td>
         <td style="white-space:nowrap;color:var(--muted)">${esc(r.kind)}</td>
         <td style="white-space:nowrap" title="등급 ${r.cls} · 품절 안 날 확률 목표 ${r.z>=1.8?"97%":(r.z>=1.2?"90%":"80% (재고 대신 긴급 보충)")} · 리드타임 ${r.L}개월(${r.og==="dom"?"국내 발주 이력":"해외/기본"})">
           <b>${ordClsLabel(r.cls)}</b>
