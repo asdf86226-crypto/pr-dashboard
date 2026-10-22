@@ -73,6 +73,14 @@
   .brand{display:flex; align-items:center; gap:14px; margin-right:auto; min-width:0}
   .logo-img{height:24px; width:auto; flex:none; filter:brightness(0) invert(1)}
   .brand h1{font-size:21px; color:#fbfdfd; font-weight:800; letter-spacing:-.03em; white-space:nowrap}
+  /* 제목줄 오른쪽 아래 — 쉐어포인트(MMS) 연결 상태 (발주현황 대시보드와 같은 모양·내용). 누르면 ERP 데이터 창 */
+  .sp-top{display:flex; justify-content:flex-end; align-items:center; gap:7px; margin-top:6px;
+          font-size:11.5px; color:#a9bec4; line-height:1.5; text-align:right; cursor:pointer}
+  .sp-top:empty{display:none}
+  .sp-top .dot{width:7px; height:7px; border-radius:50%; flex:none; background:#8a9aa0}
+  .sp-top.on .dot{background:#34d399} .sp-top.off .dot{background:#fbbf24}
+  .sp-top b{color:#eef3f5; font-weight:700}
+  .sp-top:hover span{text-decoration:underline}
   .brand-sub{
     font-size:13px; color:#9fb6bd; font-weight:600; white-space:nowrap;
     padding-left:14px; border-left:1px solid rgba(255,255,255,.22);
@@ -675,6 +683,7 @@
     <button class="sync-btn" id="refreshBtn" title="구글 시트에서 최신 내용을 다시 불러옵니다" style="display:none">⟳ 새로고침</button>
     <button class="icon-btn" id="themeBtn" title="테마 전환">◑</button>
   </div>
+  <div class="sp-top" id="spTop" title="쉐어포인트(MMS) 자료 기준 — 누르면 ERP 데이터 창이 열립니다"></div>
 </header>
 
 <div class="banner" id="localBanner">
@@ -1761,6 +1770,15 @@ function withPo_(rows){
       ? `<div class="st"><span class="dot"></span>이 파일에서는 쓸 수 없습니다</div><div class="sub">인터넷 주소로 연 대시보드에서만 쉐어포인트에 연결됩니다.</div>`
       : `<div class="st"><span class="dot"></span>${erpSpBusy ? "쉐어포인트에서 받아 계산하는 중…" : (on ? "쉐어포인트(MMS) 연결됨" : "연결 안 됨")}</div>
          <div class="sub">${esc(erpSpMsg || (on ? erpSpSummary() : "회사 마이크로소프트 계정으로 로그인합니다. 연결하면 아래 직접 올린 파일 대신 이 결과를 씁니다."))}</div>`;
+    // 제목줄 오른쪽 아래에도 같은 내용 (끝의 '다시 계산합니다' 안내는 빼고)
+    const top=$("#spTop");
+    if(top){
+      const msg=(erpSpMsg || (on ? erpSpSummary() : "")).replace(/\s*—\s*바뀐 파일이.*$/,"");
+      top.className="sp-top"+(on?" on":(window.MmsSp?" off":""));
+      top.innerHTML = !window.MmsSp ? `<span class="dot"></span>이 파일에서는 쉐어포인트에 연결할 수 없습니다`
+        : `<span class="dot"></span><b>${erpSpBusy ? "쉐어포인트에서 받아 계산하는 중…" : (on ? "쉐어포인트(MMS) 연결됨" : "연결 안 됨")}</b>`
+          + (on && msg ? `<span>${esc((/^재고/.test(msg)?"✅ ":"")+msg)}</span>` : (!on ? `<span>누르면 회사 계정으로 연결합니다</span>` : ""));
+    }
     const c=$("#erpSpConnect");
     if(c){ c.disabled=erpSpBusy || !window.MmsSp; c.textContent = on ? "⟳ 지금 다시 받기" : "☁ 쉐어포인트 연결"; }
   }
@@ -2470,6 +2488,7 @@ function withPo_(rows){
     $("#erpBg").classList.add("show");
   }
   function closeErp(){ $("#erpBg").classList.remove("show"); }
+  $("#spTop").onclick=openErp;
 
   /* ---------- 렌더: 스탯 ---------- */
   function renderStats(){
@@ -3953,7 +3972,7 @@ function withPo_(rows){
     ordLoadBom();
     // 예전 구글 시트 계산 결과(src 없음)는 더 이상 갱신되지 않아 버린다 — 쉐어포인트(sp)·직접 올리기(file)만 쓴다
     if(erp && erp.src!=="sp" && erp.src!=="file"){ erp=null; try{ localStorage.removeItem(ERPKEY); }catch(e){} }
-    renderErpPanel(); renderTable(); renderOrder();
+    renderErpPanel(); renderTable(); renderOrder(); renderErpSp();
     setTimeout(async ()=>{
       if(failStreak>0 || syncing) return;         // 목록 조회가 불안하면 건드리지 않는다
       try{
