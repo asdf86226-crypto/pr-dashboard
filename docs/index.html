@@ -230,8 +230,9 @@
   .ord-tb tr.og-c td{background:var(--surface-2); font-size:12.5px; padding-top:6px; padding-bottom:6px}
   .ord-tb tr.og-c td.ind{padding-left:30px}
   .ord-tb tr.og-sec td{background:var(--accent-soft); font-weight:800; font-size:12.5px; color:var(--ink)}
-  .ord-buy{font-size:11px; color:var(--muted); margin-top:2px; font-weight:600}
-  .ord-buy.hit{color:var(--accent); font-weight:800}
+  .ord-buy{font-size:11px; color:var(--muted); margin-top:2px; font-weight:600; display:flex; flex-wrap:wrap; gap:2px 10px}
+  .ord-buy .s{color:#2563eb}
+  .ord-buy .hit{color:var(--accent); font-weight:800; text-decoration:underline; text-underline-offset:2px}
   .ord-info{border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:11.5px; font-weight:700;
             padding:3px 10px; border-radius:999px; cursor:pointer; margin-left:8px; vertical-align:middle}
   .ord-info:hover, .ord-info.on{color:var(--ink); border-color:var(--ink)}
@@ -1349,7 +1350,7 @@ function withPo_(rows){
       <div class="f"><label title="발주부터 입고까지 걸리는 기간">리드타임 해외(개월)</label><input id="ordLtOv" type="number" min="0.5" step="0.5" value="2" style="width:110px"></div>
       <div class="f"><label>리드타임 국내(개월)</label><input id="ordLtDom" type="number" min="0.5" step="0.5" value="1" style="width:110px"></div>
       <div class="f"><label title="한 번 발주할 때 몇 개월치를 살지">1회 발주(개월)</label><input id="ordNeed" type="number" min="1" step="1" value="3" style="width:92px"></div>
-      <div class="f grow"><label>검색</label><input id="ordSearch" placeholder="품목코드·품명·구매처"></div>
+      <div class="f grow"><label>검색</label><input id="ordSearch" placeholder="품목코드·품명·구매처·판매처"></div>
       <button class="linkbtn" id="ordCsv">⬇ CSV 내보내기</button>
     </div>
 
@@ -2981,7 +2982,7 @@ function withPo_(rows){
       const rop = f*L + ss + oc, upTo = f*(L+R) + ss + oc;
       const raw=+v.s||0, stock=Math.max(0,raw), free=stock-oc, cover = f>0 ? Math.max(0,free)/f : (free>=0?Infinity:0);
       const lvl = raw<0 ? 0 : (free < f*L || free < 0 ? 1 : (stock < rop ? 2 : (cover > Math.max(12, 2*(L+R)) ? 4 : 3)));
-      out.push({ code:c, name:v.n||"", kind:v.k||"", buy:v.b||"", raw, stock, per:Math.round(f*10)/10, cover, cls, z, L, og, oc:Math.round(oc),
+      out.push({ code:c, name:v.n||"", kind:v.k||"", buy:v.b||"", sold:ocCust(c), raw, stock, per:Math.round(f*10)/10, cover, cls, z, L, og, oc:Math.round(oc),
                  sd:Math.round(st.sd*10)/10, ss:Math.round(ss), rop:Math.round(rop), spike:st.spike,
                  need:Math.round(upTo), short: lvl===1||lvl===2 ? Math.max(0, Math.round(upTo-stock)) : 0, lvl });
     });
@@ -3004,13 +3005,38 @@ function withPo_(rows){
       if(mode==="risk") return r.lvl===1||r.lvl===2;
       return true;
     });
-    if(q) list=list.filter(r=>(r.code+" "+r.name+" "+r.buy).toLowerCase().includes(q));
+    if(q) list=list.filter(r=>(r.code+" "+r.name+" "+r.buy+" "+r.sold).toLowerCase().includes(q));
     return list;
   }
 
   /* ---------- 확정 주문 → 주문서 팝업 ----------
    * 주문서 품목이면 그 주문 줄을, 부품이면 BOM 으로 그 부품이 들어가는 주문을 찾아 '이 품목 몫' 수량과 함께 보여준다. */
   const ocCell=r=> r.oc ? `<button type="button" class="oc-link" data-code="${esc(r.code)}" title="주문서 보기">${r.oc.toLocaleString()}</button>` : "-";
+  // 품목코드 → 확정 주문(미출고) 판매처들. 부품은 BOM 으로 그 부품이 들어가는 제품 주문의 판매처까지.
+  // 발주 필요에서 판매처로 찾을 때 쓴다. 자료(erp · BOM)가 바뀔 때만 다시 만든다.
+  let _occ={erp:null, bom:null, map:{}};
+  function ocCustMap(){
+    if(_occ.erp===erp && _occ.bom===ordBom) return _occ.map;
+    const map={}, list=(erp && erp.orderList)||[];
+    const add=(c,v)=>{ if(!v) return; const a=(map[c]=map[c]||[]); if(a.indexOf(v)<0) a.push(v); };
+    const stop=c=>{ const k=((erp && erp.items[c])||{}).k; return k==="[원재료]"||k==="[상품]"; };
+    list.forEach(o=>{
+      const v=(o.v||"").trim(); if(!v) return;
+      add(o.c, v);
+      if(!ordBom || !ordBom[o.c] || stop(o.c)) return;
+      let budget=5000; const seen=new Set();
+      (function walk(c, depth){
+        if(budget<=0 || depth>12 || seen.has(c) || stop(c)) return;
+        const kids=ordBom[c]; if(!kids) return;
+        seen.add(c);
+        for(const [ch] of kids){ if(--budget<=0) break; add(ch, v); walk(ch, depth+1); }
+        seen.delete(c);
+      })(o.c, 0);
+    });
+    _occ={erp, bom:ordBom, map};
+    return map;
+  }
+  const ocCust=code=>(ocCustMap()[code]||[]).join(" · ");
   function ocOrdersFor(code){
     const list=(erp && erp.orderList)||[], out=[];
     const stop=c=>{ const k=(erp.items[c]||{}).k; return k==="[원재료]"||k==="[상품]"; };
@@ -3054,8 +3080,12 @@ function withPo_(rows){
   }
 
   // 품명 아래 작게 구매처 — 검색어가 구매처에 걸리면 눈에 띄게
-  const buyTag=r=>{ if(!r.buy) return ""; const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
-    return `<div class="ord-buy${q && r.buy.toLowerCase().includes(q) ? " hit" : ""}">${esc(r.buy)}</div>`; };
+  // 품명 아래 작게 구매처 · 확정 주문 판매처 — 검색어가 걸린 쪽은 눈에 띄게
+  const buyTag=r=>{
+    const q=(($("#ordSearch")||{}).value||"").trim().toLowerCase();
+    const part=(label, t, cls)=> t ? `<span class="${cls}${q && t.toLowerCase().includes(q) ? " hit" : ""}">${label} ${esc(t)}</span>` : "";
+    const h=[part("구매", r.buy, "b"), part("주문", r.sold, "s")].filter(Boolean).join("");
+    return h ? `<div class="ord-buy">${h}</div>` : ""; };
   const ORDLV=["확인필요","위험","발주 시점","적정","과재고"];
   const ORDCOLOR=["var(--muted)","var(--risk-1)","var(--risk-2)","var(--risk-3)","#7c3aed"];
 
@@ -3108,7 +3138,7 @@ function withPo_(rows){
       Object.keys(kids).forEach(c=>covered.add(c));   // 이 제품 BOM 에 들어가는 부품은 아래 '따로 부족한 부품'에서 뺀다
       const shortKids=Object.keys(kids).filter(c=>kids[c].short>0.5).map(c=>{
         const it=erp.items[c]||{};
-        return {code:c, name:it.n||"", kind:it.k||"", buy:it.b||"", need:Math.round(kids[c].need), use:Math.round(kids[c].use),
+        return {code:c, name:it.n||"", kind:it.k||"", buy:it.b||"", sold:ocCust(c), need:Math.round(kids[c].need), use:Math.round(kids[c].use),
                 short:Math.ceil(kids[c].short), depth:kids[c].depth,
                 stock:Math.max(0, Math.round(+it.s||0)), oc:Math.round(+it.oc||0),
                 usedBefore:Math.max(0, Math.round((init[c]||0)-kids[c].before))};
@@ -3126,8 +3156,9 @@ function withPo_(rows){
     const {groups, others}=ordGroups(rows);
     const hit=t=>!q || t.toLowerCase().includes(q);
     const lvOk=r=> mode==="red" ? r.lvl===1 : true;
-    const key=r=>r.code+" "+r.name+" "+(r.buy||"");        // 구매처(거래처)로도 찾는다
-    const gs=groups.filter(g=>lvOk(g.p) && (hit(key(g.p)) || g.kids.some(k=>hit(key(k)))));
+    const key=r=>r.code+" "+r.name+" "+(r.buy||"")+" "+(r.sold||"");   // 구매처 · 확정 주문 판매처로도 찾는다
+    // 펼친 부품은 구매처까지만 본다 — 부품의 판매처는 그 부품을 같이 쓰는 다른 제품 주문이라, 엉뚱한 제품까지 걸린다
+    const gs=groups.filter(g=>lvOk(g.p) && (hit(key(g.p)) || g.kids.some(k=>hit(k.code+" "+k.name+" "+(k.buy||"")))));
     const os=others.filter(r=>lvOk(r) && hit(key(r)));
     const tP=$("#ordTabP"), tO=$("#ordTabO");
     if(tP) tP.textContent=gs.length.toLocaleString();
