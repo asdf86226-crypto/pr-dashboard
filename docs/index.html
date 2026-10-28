@@ -766,6 +766,7 @@ function doGet(e){ const p=e.parameter||{};
 function doPost(e){ const b=JSON.parse(e.postData.contents||'{}');
   // 발주 상태 요청은 구매요청 시트를 건드릴 필요가 없으므로 먼저 처리하고 끝낸다
   if(b.action==='poStatus'){ return json_({ok:true,n:poStatusSave_(b)}); }
+  if(b.action==='uploadDoc'){ return json_(uploadDoc_(b)); }
   const s=sh_();
   const v=s.getDataRange().getValues(), h=v[0], idc=h.indexOf('id');
   if(b.action==='add'){ fixFormat_(s);
@@ -858,7 +859,18 @@ function withPo_(rows){
   let o; try{ o=JSON.parse(s.getRange(1,1,s.getLastRow(),1).getValues().map(r=&gt;r[0]).join('')); }catch(e){ return rows; }
   const m={}; (o.items||[]).forEach(function(x){ m[x.id]=x; });
   rows.forEach(function(r){ const x=m[String(r.id)]; if(x) r.po=x; });
-  return rows; }</div>
+  return rows; }
+// ===== 발주현황 대시보드 수입서류(PI·CI·BL·PL·CO) 올리기 =====
+// 내 구글 드라이브 '수입서류/공급사/PI번호' 폴더에 저장하고, 링크가 있는 사람은 볼 수 있게 한 뒤 주소를 돌려준다.
+function dir_(parent,name){ name=String(name||'').replace(/[\\/:*?"&lt;&gt;|]/g,' ').trim()||'미지정';
+  const it=parent.getFoldersByName(name); return it.hasNext()?it.next():parent.createFolder(name); }
+function uploadDoc_(b){
+  if(!b.data) return {ok:false,error:'파일이 비어 있습니다'};
+  const f=dir_(dir_(dir_(DriveApp.getRootFolder(),'수입서류'),b.supplier||'공급사 미지정'),b.pi||'PI 미정');
+  const name=String(b.name||'file').replace(/[\\/:*?"&lt;&gt;|]/g,' ');
+  const file=f.createFile(Utilities.newBlob(Utilities.base64Decode(b.data),b.mime||'application/octet-stream',name));
+  try{ file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); }catch(e){}
+  return {ok:true,url:file.getUrl(),name:name}; }</div>
       <div class="stage"><span class="n">2</span>웹앱으로 배포</div>
       <ol class="steps">
         <li>우측 상단 <b>배포 → 새 배포</b> → 유형 <b>웹 앱</b></li>
