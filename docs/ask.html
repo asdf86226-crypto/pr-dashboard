@@ -508,7 +508,7 @@ function stockCard(c){
     </div>
     <div class="sm">${cover==null?"최근 12개월 판매·사용 기록이 없어 기간을 계산할 수 없어요. ":""}
       월 예측 = 지난 12개월 가중평균(제품에 들어가는 부품은 BOM 으로 푼 사용량 포함, 그룹사 내부이동 제외) · 기간 = (재고 − 확정 주문) ÷ 월 예측
-      ${it.b?`<br>구매처 ${esc(it.b)}`:""}${lastBuy?` · 최근 구매 ${lastBuy.d} ${won(lastBuy.p)}/개 (${esc(lastBuy.v)})`:""}</div>`;
+      ${it.b?`<br>구매처 ${esc(it.b)}`:""}${lastBuy?` · 최근 구매 ${lastBuy.d} ${won(krwUnit(lastBuy))}/개${fxOf(lastBuy)?" ("+fxCell(lastBuy).replace(/<[^>]+>/g,"")+")":""} · ${esc(lastBuy.v)}`:""}</div>`;
 }
 function overview(c){
   const it=DB.items[c]||{};
@@ -558,12 +558,26 @@ function purchases(codes, sup, q){
   const head=codes.length ? nameOf(codes[0]) : esc(sup)+" (구매처)";
   if(!rows.length) return `<h4>${head} 구매</h4>구매 기록이 없어요 (그룹사 사이 거래 제외).`;
   const show=rows.slice(0,codes.length?10:20);
+  const sum=rows.reduce((a,b)=>a+b.a,0);
   return `<h4>${head} · 최근 구매${pr?" ("+esc(pr.label)+")":""}</h4>
-    ${codes.length?`<div class="big">${won(rows[0].p)}<span class="sm"> /개 · 최근 ${rows[0].d} · ${esc(rows[0].v)}</span></div>`:""}
-    <table><tr><th>일자</th>${codes.length?"":"<th>품목</th>"}<th>구매처</th><th class="n">수량</th><th class="n">단가</th><th>회사</th></tr>
-    ${show.map(b=>`<tr><td>${b.d}</td>${codes.length?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(b.p)}</td><td class="sm">${esc(b.co)}</td></tr>`).join("")}</table>
+    ${codes.length?`<div class="big">${won(krwUnit(rows[0]))}<span class="sm"> /개 (원화) · ${fxNote(rows[0])}최근 ${rows[0].d} · ${esc(rows[0].v)}</span></div>`:""}
+    <table><tr><th>일자</th>${codes.length?"":"<th>품목</th>"}<th>구매처</th><th class="n">수량</th><th class="n">단가(원화)</th><th class="n">외화 단가</th><th class="n">공급가액</th><th>회사</th></tr>
+    ${show.map(b=>`<tr><td>${b.d}</td>${codes.length?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(krwUnit(b))}</td><td class="n">${fxCell(b)}</td><td class="n">${won(b.a)}</td><td class="sm">${esc(b.co)}</td></tr>`).join("")}</table>
+    <div class="sm">공급가액 합계 ${won(sum)} (${rows.length}건) · 해외 구매는 이카운트 공급가액(원화) ÷ 수량으로 원화 단가를 보여 드리고, 외화 단가와 비교해 달러($)·위안(¥)을 구분했어요</div>
     ${rows.length>show.length?`<div class="sm">외 ${rows.length-show.length}건</div>`:""}`;
 }
+// 해외 구매 — 이카운트 구매현황의 '단가'는 외화, '공급가액'은 원화로 들어온다.
+// 원화 단가 = 공급가액 ÷ 수량, 그 값과 외화 단가의 비율(=환율)로 달러인지 위안인지 가린다.
+function fxOf(b){
+  if(!(b.q>0) || !(b.a>0) || !(b.p>0)) return null;
+  const rate=b.a/b.q/b.p;
+  if(rate>=700 && rate<=2500) return {cur:"USD", sym:"$", rate};
+  if(rate>=120 && rate<400) return {cur:"CNY", sym:"¥", rate};
+  return null;                                   // 비율이 1 언저리면 원화 거래
+}
+const krwUnit=b=> b.q>0 && b.a>0 ? b.a/b.q : b.p;
+const fxCell=b=>{ const f=fxOf(b); return f ? f.sym+(Math.round(b.p*100)/100).toLocaleString()+` <span class="sm">${f.cur}</span>` : "-"; };
+const fxNote=b=>{ const f=fxOf(b); return f ? `${f.sym}${(Math.round(b.p*100)/100).toLocaleString()} ${f.cur} · 환율 약 ${Math.round(f.rate).toLocaleString()} · ` : ""; };
 function bomCheck(c, q){
   const kids=DB.bom[c];
   if(!kids) return `<h4>${nameOf(c)}</h4>BOM 에 등록된 부품이 없어요. 완제품으로 사 오는 품목일 수 있어요.`;
