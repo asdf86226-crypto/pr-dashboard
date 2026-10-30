@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>물어보기</title>
+<style>
+  /* ---------- 토큰: 라이트(기본) ---------- */
+  :root{
+    --navy:#16233d; --navy-2:#20304f;
+    --bg:#eef2f4; --surface:#f8fafb; --surface-2:#e7eef0;
+    --border:#c7d5d8; --border-strong:#aec3c8;
+    --ink:#151b22; --muted:#5b6a70; --faint:#8a999f;
+    --accent:#3f7d8c; --accent-ink:#fff; --accent-soft:#e2edef;
+    --ring:rgba(63,125,140,.35);
+    /* 팀 */
+    --t-dev:#3d5a80; --t-mat:#b8762f; --t-prod:#2f7d5c; --t-qa:#7d5aa0;
+    /* 상태 */
+    --s-new:#b8862f; --s-prog:#3d5a80; --s-done:#2f7d5c; --s-late:#b8562f;
+    /* 소진 예상 위험도: 2개월 미만 빨강 · 4개월 미만 갈색 · 4개월 이상 초록 */
+    --risk-1:#c0342c; --risk-2:#b8862f; --risk-3:#2f7d5c;
+    --shadow:0 1px 2px rgba(21,27,34,.04), 0 4px 14px rgba(21,27,34,.05);
+    --radius:8px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --navy:#0f1722; --navy-2:#182534;
+      --bg:#12181c; --surface:#1a2228; --surface-2:#232d33;
+      --border:#2e3b42; --border-strong:#3f4f57;
+      --ink:#e6ecef; --muted:#9aa9b0; --faint:#6d7d85;
+      --accent:#5fa9ba; --accent-ink:#0b1114; --accent-soft:#1c2c31;
+      --ring:rgba(95,169,186,.4);
+      --t-dev:#7fa6d4; --t-mat:#e0a85c; --t-prod:#5cba92; --t-qa:#b294d4;
+      --s-new:#d9ad5c; --s-prog:#7fa6d4; --s-done:#5cba92; --s-late:#e08a62;
+      --risk-1:#f5776a; --risk-2:#e0a252; --risk-3:#5cba92;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --navy:#0f1722; --navy-2:#182534;
+    --bg:#12181c; --surface:#1a2228; --surface-2:#232d33;
+    --border:#2e3b42; --border-strong:#3f4f57;
+    --ink:#e6ecef; --muted:#9aa9b0; --faint:#6d7d85;
+    --accent:#5fa9ba; --accent-ink:#0b1114; --accent-soft:#1c2c31;
+    --ring:rgba(95,169,186,.4);
+    --t-dev:#7fa6d4; --t-mat:#e0a85c; --t-prod:#5cba92; --t-qa:#b294d4;
+    --s-new:#d9ad5c; --s-prog:#7fa6d4; --s-done:#5cba92; --s-late:#e08a62;
+    --risk-1:#f5776a; --risk-2:#e0a252; --risk-3:#5cba92;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,
+      "Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0; height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,
+      "Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; min-height:100vh;
+  }
+  button{font-family:inherit; cursor:pointer}
+  header.top{background:var(--navy); color:#eef3f5; border-bottom:3px solid var(--accent); padding:16px 24px}
+  .top-row{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+  .logo-img{height:22px; width:auto; filter:brightness(0) invert(1)}
+  .top h1{font-size:20px; margin:0; color:#fbfdfd; font-weight:800; letter-spacing:-.03em}
+  .top .sub{font-size:13px; color:#9fb6bd; font-weight:600; padding-left:12px; border-left:1px solid rgba(255,255,255,.22)}
+  .top .grow{flex:1}
+  .top .conn{border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.08); color:#eef3f5;
+    font-size:12.5px; font-weight:700; padding:7px 12px; border-radius:7px}
+  .top .conn:hover{background:rgba(255,255,255,.16)}
+  .status{font-size:11.5px; color:var(--muted); text-align:right; padding:6px 24px 0}
+  .status b{color:var(--ink)}
+  main{flex:1; display:flex; flex-direction:column; width:100%; max-width:980px; margin:0 auto; padding:10px 16px 0; min-height:0}
+  #chat{flex:1; overflow:auto; padding:8px 2px 16px; display:flex; flex-direction:column; gap:12px}
+  .msg{max-width:88%; padding:11px 14px; border-radius:12px; line-height:1.6; box-shadow:var(--shadow); word-break:keep-all; overflow-wrap:anywhere}
+  .msg.me{align-self:flex-end; background:var(--accent); color:var(--accent-ink); border-bottom-right-radius:4px; white-space:pre-wrap}
+  .msg.bot{align-self:flex-start; background:var(--surface); border:1px solid var(--border); border-bottom-left-radius:4px}
+  .msg.bot h4{margin:0 0 6px; font-size:14.5px}
+  .msg.bot .sm{font-size:12px; color:var(--muted)}
+  .msg.bot .big{font-size:22px; font-weight:800; letter-spacing:-.02em}
+  .msg.bot table{border-collapse:collapse; margin:6px 0 2px; font-size:12.5px; width:100%}
+  .msg.bot th{background:var(--surface-2); color:var(--muted); font-weight:700; text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); white-space:nowrap}
+  .msg.bot td{padding:5px 8px; border-bottom:1px solid var(--border); vertical-align:top}
+  .msg.bot td.n, .msg.bot th.n{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .msg.bot .mono{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px}
+  .msg.bot .tag{display:inline-block; font-size:11px; font-weight:800; padding:1px 8px; border-radius:999px; margin-left:4px}
+  .tag.red{background:color-mix(in srgb,var(--risk-1) 16%,transparent); color:var(--risk-1)}
+  .tag.amb{background:color-mix(in srgb,var(--risk-2) 18%,transparent); color:var(--risk-2)}
+  .tag.ok{background:color-mix(in srgb,var(--risk-3) 16%,transparent); color:var(--risk-3)}
+  .msg.bot .pick{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .chip{border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:12.5px; font-weight:600;
+    padding:6px 11px; border-radius:999px}
+  .chip:hover{border-color:var(--accent); color:var(--accent)}
+  .msg.bot .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:6px 0}
+  .msg.bot .kpi{border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--bg)}
+  .msg.bot .kpi .k{font-size:11.5px; color:var(--muted); font-weight:700}
+  .msg.bot .kpi .v{font-size:17px; font-weight:800}
+  .bar{display:flex; align-items:flex-end; gap:3px; height:60px; margin:6px 0 2px}
+  .bar i{flex:1; background:var(--accent); border-radius:3px 3px 0 0; min-height:1px; opacity:.85}
+  .barx{display:flex; gap:3px; font-size:10px; color:var(--faint)} .barx span{flex:1; text-align:center}
+  .chips{display:flex; flex-wrap:wrap; gap:6px; padding:8px 0}
+  form.ask{display:flex; gap:8px; padding:8px 0 16px; position:sticky; bottom:0; background:var(--bg)}
+  form.ask input{flex:1; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); border-radius:10px;
+    padding:12px 14px; font-size:15px; font-family:inherit; outline:none}
+  form.ask input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--ring)}
+  form.ask button{border:0; background:var(--accent); color:var(--accent-ink); font-weight:800; border-radius:10px; padding:0 18px; font-size:14px}
+  form.ask button:disabled{opacity:.5; cursor:wait}
+  .typing{font-size:12px; color:var(--muted)}
+  @media (max-width:640px){ .top .sub{display:none} .msg{max-width:96%} }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <img class="logo-img" src="data:image/png;base64,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" alt="FLOWTECH">
+    <h1>물어보기</h1>
+    <span class="sub">재고 · 판매 · 구매 · BOM · 주문 · 입고</span>
+    <span class="grow"></span>
+    <button class="conn" id="connBtn" type="button">☁ 회사 계정으로 연결</button>
+  </div>
+</header>
+<div class="status" id="status">자료를 불러오기 전입니다.</div>
+<main>
+  <div id="chat"></div>
+  <div class="chips" id="chips"></div>
+  <form class="ask" id="askForm" autocomplete="off">
+    <input id="q" placeholder="예) 717062 재고 몇 개월 버텨?  ·  지난달 플로우텍 판매 상위 10" disabled>
+    <button id="send" disabled>보내기</button>
+  </form>
+</main>
+
+<script src="mms-sharepoint.js"></script>
+<script>
+(function(){
+"use strict";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt=v=>(Math.round((+v||0)*10)/10).toLocaleString();
+const won=v=>"₩"+Math.round(+v||0).toLocaleString();
+
+/* ===================== 엑셀 읽기 (구매요청 대시보드와 같은 가벼운 읽기) ===================== */
+  // .xlsx = zip(xml). 외부 라이브러리 없이 브라우저 압축해제(DecompressionStream)로 파싱
+  async function inflateRaw(bytes){
+    if(typeof DecompressionStream==="undefined") throw new Error("이 브라우저는 xlsx 자동 해제를 지원하지 않아요. CSV로 저장해 올려주세요");
+    const st=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(st).arrayBuffer());
+  }
+  async function unzip(u8){
+    const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+    let eocd=-1;
+    for(let i=u8.length-22;i>=0;i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+    if(eocd<0) throw new Error("올바른 엑셀(.xlsx) 파일이 아닙니다");
+    const count=dv.getUint16(eocd+10,true); let off=dv.getUint32(eocd+16,true);
+    const out={}; const td=new TextDecoder();
+    for(let e=0;e<count && dv.getUint32(off,true)===0x02014b50; e++){
+      const method=dv.getUint16(off+10,true), compSize=dv.getUint32(off+20,true);
+      const fnLen=dv.getUint16(off+28,true), exLen=dv.getUint16(off+30,true), cmLen=dv.getUint16(off+32,true);
+      const localOff=dv.getUint32(off+42,true);
+      const nm=td.decode(u8.subarray(off+46,off+46+fnLen));
+      const lFn=dv.getUint16(localOff+26,true), lEx=dv.getUint16(localOff+28,true);
+      const ds=localOff+30+lFn+lEx, comp=u8.subarray(ds,ds+compSize);
+      if(/sharedStrings|styles|worksheets\/sheet|workbook\.xml$/.test(nm)){
+        out[nm] = method===0 ? comp.slice() : await inflateRaw(comp);
+      }
+      off+=46+fnLen+exLen+cmLen;
+    }
+    return out;
+  }
+  function serialToDate(s){ const d=new Date(Date.UTC(1899,11,30)+Math.round(s)*86400000);
+    if(isNaN(d)) return String(s);
+    return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0"); }
+  function erpNorm(v){
+    const s=String(v==null?"":v);
+    let out="";
+    for(let i=0;i<s.length;i++) if(s.charCodeAt(i)>31) out+=s.charAt(i);
+    return out.replace(/^"+|"+$/g,"").trim();
+  }
+  function erpHdrKey(v){ return erpNorm(v).replace(/\s+/g,""); }
+  function erpNum(v){ const n=parseFloat(String(v==null?"":v).replace(/,/g,"").replace(/[^0-9.\-]/g,"")); return isFinite(n)?n:0; }
+  function erpKey(c){ return String(c==null?"":c).trim().toUpperCase().replace(/\s+/g,""); }
+  // ERP CSV 는 따옴표 안에 탭이 섞여 나오는 경우가 있어 따옴표 규칙을 먼저 적용한다
+  function erpParseText(text){
+    text=String(text).replace(/^﻿/,"").replace(/\r\n?/g,"\n");
+    const rows=[]; let row=[], cur="", q=false;
+    for(let i=0;i<text.length;i++){ const c=text[i];
+      if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+      else if(c==='"') q=true;
+      else if(c===','){ row.push(cur); cur=""; }
+      else if(c==='\n'){ row.push(cur); rows.push(row); row=[]; cur=""; }
+      else cur+=c;
+    }
+    if(cur!==""||row.length){ row.push(cur); rows.push(row); }
+    const wide=rows.reduce((m,r)=>Math.max(m,r.length),0);
+    if(wide>=2) return rows;
+    return text.split("\n").map(l=>l.split("\t"));   // 진짜 TSV
+  }
+  function erpUnesc(s){
+    if(s.indexOf("&")<0) return s;
+    return s.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-fA-F]+);/g,(m,e)=>{
+      if(e==="lt") return "<"; if(e==="gt") return ">"; if(e==="amp") return "&";
+      if(e==="quot") return '"'; if(e==="apos") return "'";
+      if(e.charAt(0)==="#"){ const n = e.charAt(1)==="x" ? parseInt(e.slice(2),16) : +e.slice(1);
+        return isFinite(n) ? String.fromCodePoint(n) : m; }
+      return m;
+    });
+  }
+  async function erpReadXlsx(buf){
+    const files=await unzip(new Uint8Array(buf));
+    const td=new TextDecoder();
+    const dec=nm=> files[nm] ? td.decode(files[nm]) : "";
+
+    const shared=[]; const ssx=dec("xl/sharedStrings.xml");
+    if(ssx){
+      const siRe=/<si\b[^>]*>([\s\S]*?)<\/si>/g; let m;
+      while((m=siRe.exec(ssx))){
+        let s=""; const tRe=/<t\b[^>]*>([\s\S]*?)<\/t>/g; let t;
+        while((t=tRe.exec(m[1]))) s+=t[1];
+        shared.push(erpUnesc(s));
+      }
+    }
+    const dateStyle=[]; const stx=dec("xl/styles.xml");
+    if(stx){
+      const fmt={}; const fRe=/<numFmt\b[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g; let f;
+      while((f=fRe.exec(stx))) fmt[f[1]]=erpUnesc(f[2]);
+      const isDate=id=>{ const k=+id; if((k>=14&&k<=22)||(k>=45&&k<=47)) return true;
+        const c=fmt[id]; return c ? /[dmy]/i.test(c.replace(/\[[^\]]*\]/g,"").replace(/"[^"]*"/g,"")) : false; };
+      const cx=stx.match(/<cellXfs\b[\s\S]*?<\/cellXfs>/);   // cellStyleXfs 가 아니라 cellXfs
+      if(cx){ const xRe=/<xf\b[^>]*>/g; let x, i=0;
+        while((x=xRe.exec(cx[0]))){ const id=(x[0].match(/numFmtId="(\d+)"/)||[])[1]||"0"; dateStyle[i++]=isDate(id); } }
+    }
+    const sheetNm=Object.keys(files).filter(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0];
+    if(!sheetNm) throw new Error("워크시트를 찾을 수 없습니다");
+    const xml=dec(sheetNm);
+    const rows=[]; const rowRe=/<row\b[^>]*>([\s\S]*?)<\/row>/g; let r;
+    const cellRe=/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    while((r=rowRe.exec(xml))){
+      const cells=[]; let c; cellRe.lastIndex=0;
+      while((c=cellRe.exec(r[1]))){
+        const at=c[1]||"", body=c[2]||"";
+        const ref=(at.match(/r="([A-Z]+)/)||[])[1]||"";
+        const t=(at.match(/t="([^"]*)"/)||[])[1]||"";
+        const s=(at.match(/s="(\d+)"/)||[])[1];
+        let col; if(ref){ col=0; for(let i=0;i<ref.length;i++) col=col*26+(ref.charCodeAt(i)-64); col--; } else col=cells.length;
+        let val="";
+        if(t==="s"){ const v=(body.match(/<v>([\s\S]*?)<\/v>/)||[])[1]; val=shared[+v]||""; }
+        else if(t==="inlineStr"){ let s2=""; const tRe=/<t\b[^>]*>([\s\S]*?)<\/t>/g; let tm;
+          while((tm=tRe.exec(body))) s2+=tm[1]; val=erpUnesc(s2); }
+        else { const v=(body.match(/<v>([\s\S]*?)<\/v>/)||[])[1];
+          const raw=(v==null)?"":erpUnesc(v);
+          val=(raw!=="" && s!=null && dateStyle[+s]) ? serialToDate(+raw) : raw; }
+        cells[col]=val;
+      }
+      for(let i=0;i<cells.length;i++) if(cells[i]==null) cells[i]="";
+      rows.push(cells);
+    }
+    return rows;
+  }
+
+/* ===================== 자료 ===================== */
+// 쉐어포인트 MMS 폴더(두 회사)의 최신 파일을 읽어 질문에 답할 자료로 만든다. 모두 읽기만 한다.
+const COS=["태성정밀","플로우텍"];
+const GROUPCO=["태성정밀","플로우텍"];
+const BAD_WH=/불량/;
+const coName=v=>erpNorm(v).replace(/\s+/g,"").replace(/㈜|\(주\)|주\)|\(유\)|유\)|주식회사|유한회사/g,"");
+const isGroup=v=>GROUPCO.indexOf(coName(v))>=0;
+const REPORTS=["품목정보","창고별재고현황","재고현황","판매현황_전체","구매현황_전체","BOM","주문서현황"];
+const PO_PATH="발주현황/발주현황.json";   // 발주현황 대시보드가 파워오토메이트로 올려 두는 발주 목록(있으면)
+let DB=null;
+
+function ymd(v){                      // 어떤 모양의 날짜든 'YYYY-MM-DD'
+  const s=erpNorm(v).replace(/[./]/g,"-");
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})(?:\D|$)/);
+  if(m) return m[1]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[3]).padStart(2,"0");
+  const n=parseFloat(s);
+  if(n>20000 && n<80000) return serialToDate(n);
+  return "";
+}
+function hdr(rows, need){
+  for(let i=0;i<Math.min(rows.length,20);i++){
+    const r=(rows[i]||[]).map(erpHdrKey);
+    if(need.every(k=>r.indexOf(k)>=0)) return i;
+  }
+  return -1;
+}
+function colsOf(rows,hi){ const m={}; (rows[hi]||[]).forEach((c,i)=>{ const k=erpHdrKey(c); if(k && m[k]==null) m[k]=i; }); return m; }
+const pick=(m,names)=>{ for(const n of names) if(m[n]!=null) return m[n]; return null; };
+
+async function loadAll(interactive){
+  const metas=[];
+  for(const rep of REPORTS) for(const co of COS){
+    const path=MmsSp.reportPath(co, rep);
+    try{ metas.push({co, rep, path, meta: await MmsSp.meta(path, interactive)}); }
+    catch(e){ if(e.status===404) continue; throw e; }
+  }
+  // 창고별재고현황이 있는 회사는 재고현황(전체 합계)을 쓰지 않는다
+  for(let i=metas.length-1;i>=0;i--){ const m=metas[i];
+    if(m.rep==="재고현황" && metas.some(x=>x.co===m.co && x.rep==="창고별재고현황")) metas.splice(i,1); }
+  let poMeta=null; try{ poMeta=await MmsSp.meta(PO_PATH, false); }catch(e){}
+  const sig=metas.map(m=>m.meta.eTag).join("|")+"|"+(poMeta?poMeta.eTag:"");
+  const cached=await idbGet("db");
+  if(cached && cached.sig===sig && cached.ver===VER){ DB=cached.db; return DB; }
+
+  const db={ items:{}, sales:[], buys:[], bom:{}, orders:[], pos:null, at:{}, cust:new Set(), supp:new Set() };
+  const item=c=>(db.items[c]=db.items[c]||{c, n:"", k:"", b:"", s:0, hasS:false});
+  for(const m of metas){
+    setStatus(`불러오는 중… ${m.co} ${m.rep}`);
+    const got=await MmsSp.download(m.path, false);
+    const rows=await erpReadXlsx(got.bytes);
+    const t=m.meta.lastModifiedDateTime; if(t && (!db.at[m.rep] || t<db.at[m.rep])) db.at[m.rep]=t;
+    if(m.rep==="품목정보"){
+      const hi=hdr(rows,["품목코드"]); if(hi<0) continue; const c=colsOf(rows,hi);
+      const cC=c["품목코드"], cN=pick(c,["품목명","품명","품명및규격","품목명[규격]"]), cK=pick(c,["품목구분"]), cB=pick(c,["구매처명","구매처"]);
+      for(const r of rows.slice(hi+1)){ const code=erpNorm(r[cC]); if(!code) continue; const it=item(code);
+        if(cN!=null && !it.n) it.n=erpNorm(r[cN]); if(cK!=null && !it.k) it.k=erpNorm(r[cK]).replace(/^\[|\]$/g,"");
+        if(cB!=null && !it.b) it.b=erpNorm(r[cB]); }
+    }else if(m.rep==="창고별재고현황" || m.rep==="재고현황"){
+      const hi=hdr(rows,["품목코드","재고수량"]); if(hi<0) continue; const c=colsOf(rows,hi);
+      const cC=c["품목코드"], cQ=c["재고수량"], cW=pick(c,["창고명"]), cN=pick(c,["품목명[규격]","품명및규격","품목명","품명"]), cB=pick(c,["구매처명"]);
+      for(const r of rows.slice(hi+1)){ const code=erpNorm(r[cC]); if(!code || /^합\s*계$/.test(code)) continue; const it=item(code);
+        if(cN!=null && !it.n) it.n=erpNorm(r[cN]); if(cB!=null && !it.b) it.b=erpNorm(r[cB]);
+        it.hasS=true;
+        if(cW!=null && BAD_WH.test(erpNorm(r[cW]))) continue;      // 불량창고는 빼고
+        it.s+=erpNum(r[cQ]); }
+    }else if(m.rep==="판매현황_전체" || m.rep==="구매현황_전체"){
+      const buy=m.rep==="구매현황_전체";
+      const hi=hdr(rows,["품목코드","수량"]); if(hi<0) continue; const c=colsOf(rows,hi);
+      const cD=pick(c,["일자"]), cC=c["품목코드"], cQ=c["수량"], cN=pick(c,["품목명","품명","품목명(규격)","품목명[규격]"]),
+            cV=pick(c, buy ? ["구매처명","거래처명","구매처"] : ["거래처명","판매처명","거래처","판매처"]),
+            cP=pick(c,["단가"]), cA=pick(c,["공급가액"]);
+      for(const r of rows.slice(hi+1)){
+        const code=erpNorm(r[cC]); const d=ymd(r[cD]); if(!code || !d) continue;
+        const v=cV!=null?erpNorm(r[cV]):"";
+        const it=item(code); if(cN!=null && !it.n) it.n=erpNorm(r[cN]);
+        const row={d, c:code, q:erpNum(r[cQ]), v, co:m.co, p:cP!=null?erpNum(r[cP]):0, a:cA!=null?erpNum(r[cA]):0, g:isGroup(v)};
+        (buy?db.buys:db.sales).push(row);
+        if(v && !row.g) (buy?db.supp:db.cust).add(v);
+      }
+    }else if(m.rep==="BOM"){
+      const hi=hdr(rows,["생산품목코드","소모품목코드"]); if(hi<0) continue; const c=colsOf(rows,hi);
+      const cP=c["생산품목코드"], cC=c["소모품목코드"], cMk=pick(c,["생산수량"]), cU=pick(c,["소요량"]), cPn=pick(c,["생산품목명"]), cCn=pick(c,["소모품목명"]);
+      let last="";
+      for(const r of rows.slice(hi+1)){
+        const pr=erpNorm(r[cP]), ch=erpNorm(r[cC]); if(pr) last=pr; const p=pr||(ch?last:""); if(!p||!ch) continue;
+        const per=erpNum(r[cU])/(erpNum(r[cMk])||1); if(!(per>0)) continue;
+        const a=(db.bom[p]=db.bom[p]||[]); const ex=a.find(x=>x[0]===ch); if(ex){ if(per>ex[1]) ex[1]=per; } else a.push([ch,per]);
+        if(cPn!=null && !item(p).n) item(p).n=erpNorm(r[cPn]); if(cCn!=null && !item(ch).n) item(ch).n=erpNorm(r[cCn]);
+      }
+    }else if(m.rep==="주문서현황"){
+      const hi=hdr(rows,["품목코드","수량"]); if(hi<0) continue; const c=colsOf(rows,hi);
+      const cC=c["품목코드"], cQ=c["수량"], cV=pick(c,["거래처명","거래처"]), cS=pick(c,["진행상태","상태"]), cD=pick(c,["납기일자","납기일"]), cNo=pick(c,["일자-No.","일자-No","일자"]);
+      const grace=new Date(); grace.setDate(grace.getDate()-30); const cut=grace.toISOString().slice(0,10);
+      for(const r of rows.slice(hi+1)){
+        const code=erpNorm(r[cC]); if(!code || /^합\s*계$/.test(code)) continue;
+        const st=cS!=null?erpNorm(r[cS]):""; if(/완료|종결|마감|취소/.test(st)) continue;
+        const due=cD!=null?ymd(r[cD]):""; if(due && due<cut) continue;      // 납기 30일 넘게 지난 건 나간 것으로 본다
+        db.orders.push({c:code, q:erpNum(r[cQ]), v:cV!=null?erpNorm(r[cV]):"", due, no:cNo!=null?erpNorm(r[cNo]):"", co:m.co, st});
+      }
+    }
+  }
+  if(poMeta){
+    try{ const got=await MmsSp.download(PO_PATH,false); db.pos=JSON.parse(new TextDecoder().decode(got.bytes)); }catch(e){ console.warn("[발주] 목록을 못 읽었습니다", e); }
+  }
+  db.cust=[...db.cust]; db.supp=[...db.supp];
+  DB=db; idbPut("db",{sig, ver:VER, db}).catch(()=>{});
+  return db;
+}
+const VER=1;
+function idb(){ return new Promise((ok,bad)=>{ const r=indexedDB.open("ask_dash",1); r.onupgradeneeded=()=>r.result.createObjectStore("kv"); r.onsuccess=()=>ok(r.result); r.onerror=()=>bad(r.error); }); }
+async function idbGet(k){ try{ const d=await idb(); return await new Promise(ok=>{ const q=d.transaction("kv").objectStore("kv").get(k); q.onsuccess=()=>ok(q.result); q.onerror=()=>ok(null); }); }catch(e){ return null; } }
+async function idbPut(k,v){ const d=await idb(); return new Promise((ok,bad)=>{ const t=d.transaction("kv","readwrite"); t.objectStore("kv").put(v,k); t.oncomplete=ok; t.onerror=()=>bad(t.error); }); }
+
+/* ===================== 계산 ===================== */
+const key=c=>String(c||"").trim().toUpperCase().replace(/\s+/g,"");
+let CODEIDX=null;
+function codeIdx(){ if(CODEIDX && CODEIDX.db===DB) return CODEIDX.m; const m={}; for(const c in DB.items) m[key(c)]=c; CODEIDX={db:DB,m}; return m; }
+function monthsBack(n){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-n); return d; }
+const ymOf=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+// 품목의 월별 수요(지난달부터 12개월) — 바깥 판매 + 그 품목이 들어가는 제품 판매를 BOM 으로 푼 양 (그룹사 내부이동 제외)
+let DEMAND=null;
+function demand(){
+  if(DEMAND && DEMAND.db===DB) return DEMAND.m;
+  const idx={}; for(let i=1;i<=12;i++) idx[ymOf(monthsBack(i))]=i-1;
+  const direct={};
+  for(const r of DB.sales){ if(r.g) continue; const k=idx[r.d.slice(0,7)]; if(k==null) continue; (direct[r.c]=direct[r.c]||new Array(12).fill(0))[k]+=r.q; }
+  const total={}; const add=(c,arr,mul)=>{ const t=(total[c]=total[c]||new Array(12).fill(0)); for(let i=0;i<12;i++) t[i]+=arr[i]*mul; };
+  const stop=c=>{ const k=(DB.items[c]||{}).k; return k==="원재료"||k==="상품"; };
+  for(const c in direct){
+    add(c, direct[c], 1);
+    if(!DB.bom[c] || stop(c)) continue;
+    let budget=4000; const seen=new Set();
+    (function walk(p, mul, depth){
+      if(budget<=0 || depth>10 || seen.has(p)) return; seen.add(p);
+      for(const [ch,per] of DB.bom[p]||[]){ if(--budget<=0) break; add(ch, direct[c], mul*per); if(DB.bom[ch] && !stop(ch)) walk(ch, mul*per, depth+1); }
+      seen.delete(p);
+    })(c, 1, 0);
+  }
+  DEMAND={db:DB, m:total}; return total;
+}
+// 월 예측 — 구매요청 대시보드 '발주 필요'와 같은 방식(12개월 가중평균 3/2/1, 대량 거래 달 보정)
+function forecast(v){
+  if(!v) return 0; v=v.slice(); const tot=v.reduce((a,b)=>a+b,0);
+  if(tot>0){ const mx=Math.max(...v), k=v.indexOf(mx), rest=(tot-mx)/11; if(mx>3*rest && mx>=0.3*tot && v.filter(x=>x>0).length>=8) v[k]=rest; }
+  const w=v.map((_,i)=>i<3?3:(i<6?2:1)); return v.reduce((a,x,i)=>a+x*w[i],0)/w.reduce((a,b)=>a+b,0);
+}
+function openOrderQty(c){ return DB.orders.filter(o=>o.c===c).reduce((s,o)=>s+o.q,0); }
+
+/* ===================== 질문 알아듣기 ===================== */
+function findCodes(q){
+  const idx=codeIdx(), out=[];
+  const toks=q.match(/[A-Za-z0-9][A-Za-z0-9._\-\/]{1,}/g)||[];
+  for(const t of toks){ const c=idx[key(t)]; if(c && out.indexOf(c)<0) out.push(c); }
+  return out;
+}
+function guessCodes(q){            // 정확한 코드가 없으면 일부 글자나 품명으로 찾는다
+  const toks=(q.match(/[A-Za-z0-9][A-Za-z0-9._\-]{3,}/g)||[]).map(key);
+  const words=(q.replace(/[A-Za-z0-9._\-]+/g," ").match(/[가-힣A-Za-z]{2,}/g)||[]).filter(w=>!STOP.test(w));
+  const res=[];
+  for(const c in DB.items){ const kc=key(c), n=DB.items[c].n||"";
+    if(toks.some(t=>kc.indexOf(t)>=0) || (words.length && words.every(w=>n.indexOf(w)>=0))) res.push(c); }
+  return res;
+}
+const STOP=/^(재고|판매|구매|매입|단가|주문|입고|예정|부품|부족|몇|개월|버텨|버틸|지난달|이번달|이번주|다음주|올해|작년|최근|상위|순위|많이|팔린|팔림|품목|제품|상품|알려줘|보여줘|얼마|얼마에|샀|사온|들어오는|들어와|언제|있어|없어|태성|태성정밀|플로우텍|만들|생산|가능|개|수량|금액|거래처|구매처|판매처|확정|미출고|이번|지난|월|주|년)$/;
+function findName(list, q){
+  const nq=coName(q); let best="";
+  for(const v of list){ const n=coName(v); if(n.length>=2 && nq.indexOf(n)>=0 && n.length>best.length) best=v; }
+  if(best) return best;
+  // 앞 두세 글자만 써도 찾는다 (예: '대림' → 대림바스)
+  const words=(q.match(/[가-힣A-Za-z]{2,}/g)||[]).filter(w=>!STOP.test(w));
+  for(const w of words){ const hit=list.filter(v=>coName(v).indexOf(w)===0); if(hit.length===1) return hit[0]; }
+  return "";
+}
+// future: 입고 예정처럼 앞날을 묻는 질문 — '11월'은 올해(지났으면 내년) 11월
+function period(q, def, future){
+  const now=new Date(), Y=now.getFullYear(), M=now.getMonth(), d=x=>x.toISOString().slice(0,10);
+  const loc=(y,m,dd)=>{ const t=new Date(y,m,dd); return t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0"); };
+  let m;
+  if(/지난\s*달|전월|저번\s*달/.test(q)) return {from:loc(Y,M-1,1), to:loc(Y,M,0), label:"지난달"};
+  if(/이번\s*달|이달|금월/.test(q)) return {from:loc(Y,M,1), to:loc(Y,M,now.getDate()), label:"이번 달"};
+  if(/작년|전년|지난\s*해/.test(q)) return {from:(Y-1)+"-01-01", to:(Y-1)+"-12-31", label:(Y-1)+"년"};
+  if(/올해|금년|이번\s*해/.test(q)) return {from:Y+"-01-01", to:loc(Y,M,now.getDate()), label:Y+"년"};
+  if((m=q.match(/최근\s*(\d+)\s*개월/))) return {from:loc(Y,M-(+m[1]),now.getDate()+1), to:loc(Y,M,now.getDate()), label:"최근 "+m[1]+"개월"};
+  if((m=q.match(/(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월/))){ let y=m[1]?+m[1]:Y, mm=+m[2]-1; if(!m[1] && !future && mm>M) y--; if(!m[1] && future && mm<M) y++; return {from:loc(y,mm,1), to:loc(y,mm+1,0), label:y+"년 "+(mm+1)+"월"}; }
+  return def;
+}
+function topN(q, def){ const m=q.match(/(?:top|TOP|상위)\s*(\d+)|(\d+)\s*(?:위|개|등)/); return m ? Math.min(50, +(m[1]||m[2])) : def; }
+
+function answer(qRaw){
+  const q=qRaw.trim();
+  if(!DB) return "자료를 아직 불러오지 못했어요. 위의 <b>☁ 회사 계정으로 연결</b>을 눌러 주세요.";
+  if(/^(도움|도움말|help|\?|사용법|뭘?\s*물어)/i.test(q)) return helpHtml();
+  const codes=findCodes(q);
+  const co=/플로우텍|플로텍|flowtech/i.test(q) ? "플로우텍" : (/태성/.test(q) ? "태성정밀" : "");
+  const want={
+    inc:/입고|들어오|들어와|도착|입고\s*예정/.test(q),
+    bom:/bom|구성품|만들|생산\s*가능|부품\s*(부족|모자)|(부족|모자란)\s*부품/i.test(q),
+    ord:/주문|수주|오더|미출고|확정/.test(q),
+    buy:/구매|매입|단가|샀|사온|입고가|매입가/.test(q),
+    sale:/판매|팔|매출|출고|순위|상위|top|많이/i.test(q),
+    stock:/재고|몇\s*개|버텨|버틸|소진|남았|남아/.test(q),
+  };
+  if(want.inc && !want.buy) return incoming(q, codes);
+  if(want.ord){ const cust=findName(DB.cust.concat(DB.orders.map(o=>o.v)), q); return orders(codes, cust); }
+  if(want.buy){ const sup=findName(DB.supp, q); return purchases(codes, sup, q); }
+  if(want.bom){ if(!codes.length) return choose(q, "BOM"); return bomCheck(codes[0], q); }
+  if(want.sale && (!codes.length || /순위|상위|top|많이/i.test(q))){ const cust=findName(DB.cust, q); return salesTop(q, co, cust); }
+  if(want.sale) return itemSales(codes[0], q);
+  if(want.stock){ if(!codes.length) return choose(q, "재고"); return codes.map(stockCard).join("<hr>"); }
+  if(codes.length) return overview(codes[0]);
+  const cust=findName(DB.cust, q); if(cust) return salesTop(q, co, cust);
+  const g=guessCodes(q); if(g.length) return choose(q, "");
+  return "무슨 말인지 잘 모르겠어요 😅<br>" + helpHtml();
+}
+function choose(q, intent){
+  const g=guessCodes(q).slice(0,12);
+  if(!g.length) return `어떤 품목인지 찾지 못했어요. <b>품목코드</b>를 같이 써 주세요. 예) <code>717062 ${intent||"재고"}</code>`;
+  if(g.length===1) return answer(g[0]+" "+q);
+  return `어느 품목인가요? 눌러 주세요.<div class="pick">${g.map(c=>`<button class="chip" data-q="${esc(c+" "+(intent||""))}">${esc(c)} · ${esc((DB.items[c]||{}).n||"")}</button>`).join("")}</div>`;
+}
+function nameOf(c){ const it=DB.items[c]||{}; return `<span class="mono">${esc(c)}</span> ${esc(it.n||"")}`; }
+
+function stockCard(c){
+  const it=DB.items[c]||{}, v=demand()[c], f=forecast(v), oc=openOrderQty(c), free=(it.s||0)-oc;
+  const cover=f>0 ? Math.max(0,free)/f : null;
+  const tag = cover==null ? "" : cover<2 ? `<span class="tag red">위험</span>` : cover<4 ? `<span class="tag amb">주의</span>` : `<span class="tag ok">여유</span>`;
+  const lastBuy=DB.buys.filter(b=>b.c===c && !b.g).sort((a,b)=>b.d.localeCompare(a.d))[0];
+  return `<h4>${nameOf(c)} ${tag}</h4>
+    <div class="grid">
+      <div class="kpi"><div class="k">재고 (불량창고 제외)</div><div class="v">${fmt(it.s||0)}개</div></div>
+      <div class="kpi"><div class="k">월 예측 사용량</div><div class="v">${fmt(f)}개</div></div>
+      <div class="kpi"><div class="k">버틸 수 있는 기간</div><div class="v">${cover==null?"-":(cover>99?"99개월+":fmt(cover)+"개월")}</div></div>
+      <div class="kpi"><div class="k">확정 주문(미출고)</div><div class="v">${fmt(oc)}개</div></div>
+    </div>
+    <div class="sm">${cover==null?"최근 12개월 판매·사용 기록이 없어 기간을 계산할 수 없어요. ":""}
+      월 예측 = 지난 12개월 가중평균(제품에 들어가는 부품은 BOM 으로 푼 사용량 포함, 그룹사 내부이동 제외) · 기간 = (재고 − 확정 주문) ÷ 월 예측
+      ${it.b?`<br>구매처 ${esc(it.b)}`:""}${lastBuy?` · 최근 구매 ${lastBuy.d} ${won(lastBuy.p)}/개 (${esc(lastBuy.v)})`:""}</div>`;
+}
+function overview(c){
+  const it=DB.items[c]||{};
+  const p=period("", null), from=ymOf(monthsBack(3))+"-01";
+  const s3=DB.sales.filter(r=>r.c===c && !r.g && r.d>=from).reduce((s,r)=>s+r.q,0);
+  const parents=Object.keys(DB.bom).filter(pp=>DB.bom[pp].some(x=>x[0]===c));
+  return stockCard(c)
+    + `<div class="sm" style="margin-top:6px">최근 3개월 판매 ${fmt(s3)}개${parents.length?` · 이 품목이 들어가는 제품 ${parents.length}개`:""}${DB.bom[c]?` · BOM 부품 ${DB.bom[c].length}개`:""}</div>`
+    + `<div class="pick">${[["판매",c+" 최근 12개월 판매"],["구매 단가",c+" 최근 구매 단가"],["BOM",c+" BOM 부족"],["주문",c+" 주문"],["입고 예정",c+" 입고 예정"]]
+        .filter(x=>x[0]!=="BOM" || DB.bom[c]).map(x=>`<button class="chip" data-q="${esc(x[1])}">${x[0]}</button>`).join("")}</div>`;
+}
+function itemSales(c, q){
+  const pr=period(q, {from:ymOf(monthsBack(12))+"-01", to:new Date().toISOString().slice(0,10), label:"최근 12개월"});
+  const rows=DB.sales.filter(r=>r.c===c && !r.g && r.d>=pr.from && r.d<=pr.to);
+  const tot=rows.reduce((s,r)=>s+r.q,0), amt=rows.reduce((s,r)=>s+r.a,0);
+  const byM={}; rows.forEach(r=>byM[r.d.slice(0,7)]=(byM[r.d.slice(0,7)]||0)+r.q);
+  const months=Object.keys(byM).sort(); const mx=Math.max(1,...months.map(m=>byM[m]));
+  const byV={}; rows.forEach(r=>byV[r.v]=(byV[r.v]||0)+r.q);
+  const top=Object.entries(byV).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  return `<h4>${nameOf(c)} · ${esc(pr.label)} 판매</h4>
+    <div class="big">${fmt(tot)}개</div><div class="sm">${pr.from} ~ ${pr.to} · 금액 ${won(amt)} · ${rows.length}건 (그룹사 내부이동 제외)</div>
+    ${months.length>1?`<div class="bar">${months.map(m=>`<i style="height:${(byM[m]/mx*100).toFixed(0)}%" title="${m} ${fmt(byM[m])}개"></i>`).join("")}</div>
+      <div class="barx">${months.map(m=>`<span>${+m.slice(5)}월</span>`).join("")}</div>`:""}
+    ${top.length?`<table><tr><th>판매처</th><th class="n">수량</th></tr>${top.map(x=>`<tr><td>${esc(x[0]||"-")}</td><td class="n">${fmt(x[1])}</td></tr>`).join("")}</table>`:""}`;
+}
+function salesTop(q, co, cust){
+  const pr=period(q, {from:ymOf(monthsBack(1))+"-01", to:ymOf(new Date())+"-00", label:"지난달"});
+  if(pr.to.endsWith("-00")){ const d=new Date(); d.setDate(0); pr.to=d.toISOString().slice(0,10); }
+  const n=topN(q,10);
+  const rows=DB.sales.filter(r=>!r.g && r.d>=pr.from && r.d<=pr.to && (!co || r.co===co) && (!cust || coName(r.v)===coName(cust)));
+  const by={}; rows.forEach(r=>{ const x=(by[r.c]=by[r.c]||{q:0,a:0}); x.q+=r.q; x.a+=r.a; });
+  const list=Object.entries(by).filter(x=>x[1].q>0).sort((a,b)=>b[1].q-a[1].q).slice(0,n);
+  const title=[co, cust?esc(cust)+" (판매처)":"", esc(pr.label)].filter(Boolean).join(" · ");
+  if(!list.length) return `<h4>${title} 판매</h4>해당 기간 판매 기록이 없어요.`;
+  return `<h4>${title} 판매 상위 ${list.length}</h4><div class="sm">${pr.from} ~ ${pr.to} · 수량 순 · 그룹사 내부이동 제외</div>
+    <table><tr><th>#</th><th>품목</th><th class="n">수량</th><th class="n">금액</th></tr>
+    ${list.map(([c,x],i)=>`<tr><td>${i+1}</td><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button> ${esc((DB.items[c]||{}).n||"")}</td><td class="n">${fmt(x.q)}</td><td class="n">${won(x.a)}</td></tr>`).join("")}</table>`;
+}
+function purchases(codes, sup, q){
+  const pr=period(q, null);
+  let rows=DB.buys.filter(b=>!b.g);
+  if(codes.length) rows=rows.filter(b=>codes.indexOf(b.c)>=0);
+  else if(sup) rows=rows.filter(b=>coName(b.v)===coName(sup));
+  else return choose(q, "구매 단가");
+  if(pr) rows=rows.filter(b=>b.d>=pr.from && b.d<=pr.to);
+  rows.sort((a,b)=>b.d.localeCompare(a.d));
+  const head=codes.length ? nameOf(codes[0]) : esc(sup)+" (구매처)";
+  if(!rows.length) return `<h4>${head} 구매</h4>구매 기록이 없어요 (그룹사 사이 거래 제외).`;
+  const show=rows.slice(0,codes.length?10:20);
+  return `<h4>${head} · 최근 구매${pr?" ("+esc(pr.label)+")":""}</h4>
+    ${codes.length?`<div class="big">${won(rows[0].p)}<span class="sm"> /개 · 최근 ${rows[0].d} · ${esc(rows[0].v)}</span></div>`:""}
+    <table><tr><th>일자</th>${codes.length?"":"<th>품목</th>"}<th>구매처</th><th class="n">수량</th><th class="n">단가</th><th>회사</th></tr>
+    ${show.map(b=>`<tr><td>${b.d}</td>${codes.length?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(b.p)}</td><td class="sm">${esc(b.co)}</td></tr>`).join("")}</table>
+    ${rows.length>show.length?`<div class="sm">외 ${rows.length-show.length}건</div>`:""}`;
+}
+function bomCheck(c, q){
+  const kids=DB.bom[c];
+  if(!kids) return `<h4>${nameOf(c)}</h4>BOM 에 등록된 부품이 없어요. 완제품으로 사 오는 품목일 수 있어요.`;
+  const m=q.match(/(\d[\d,]*)\s*개\s*(?:만들|생산|조립)/); const want=m?+m[1].replace(/,/g,""):0;
+  const rows=kids.map(([ch,per])=>{ const s=Math.max(0,(DB.items[ch]||{}).s||0); return {ch, per, s, can:Math.floor(s/per), need:want?Math.max(0,Math.ceil(per*want-s)):0}; })
+    .sort((a,b)=>a.can-b.can);
+  const max=rows.length?rows[0].can:0;
+  return `<h4>${nameOf(c)} · BOM 부품 재고</h4>
+    <div class="big">${want?(rows.some(r=>r.need>0)?`${fmt(want)}개 만들려면 부족한 부품 ${rows.filter(r=>r.need>0).length}개`:`${fmt(want)}개 만들 수 있어요 👍`):`지금 재고로 최대 ${fmt(max)}개 생산 가능`}</div>
+    <div class="sm">제품 재고 ${fmt((DB.items[c]||{}).s||0)}개 · 한 단계 아래 부품 기준 (불량창고 제외 재고)</div>
+    <table><tr><th>부품</th><th class="n">개당</th><th class="n">재고</th><th class="n">만들 수 있는 수</th>${want?`<th class="n">부족</th>`:""}</tr>
+    ${rows.map(r=>`<tr><td><span class="mono">${esc(r.ch)}</span> ${esc((DB.items[r.ch]||{}).n||"")}</td><td class="n">${fmt(r.per)}</td><td class="n">${fmt(r.s)}</td><td class="n">${r.can===max?`<b style="color:var(--risk-1)">${fmt(r.can)}</b>`:fmt(r.can)}</td>${want?`<td class="n">${r.need?`<b style="color:var(--risk-1)">${fmt(r.need)}</b>`:"-"}</td>`:""}</tr>`).join("")}</table>
+    <div class="sm">"${esc(c)} 500개 만들려면?"처럼 물으면 부족 수량을 계산해요.</div>`;
+}
+function orders(codes, cust){
+  let rows=DB.orders.slice();
+  if(codes.length) rows=rows.filter(o=>codes.indexOf(o.c)>=0);
+  else if(cust) rows=rows.filter(o=>coName(o.v)===coName(cust));
+  rows.sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999"));
+  const head=codes.length?nameOf(codes[0]):(cust?esc(cust):"전체");
+  if(!rows.length) return `<h4>${head} · 확정 주문</h4>진행중인(미출고) 주문이 없어요.`;
+  const today=new Date().toISOString().slice(0,10);
+  return `<h4>${head} · 확정 주문(미출고) ${rows.length}건 · ${fmt(rows.reduce((s,o)=>s+o.q,0))}개</h4>
+    <div class="sm">주문서현황 기준 · 완료 건과 납기가 30일 넘게 지난 건은 뺐어요</div>
+    <table><tr><th>납기</th><th>거래처</th>${codes.length?"":"<th>품목</th>"}<th class="n">수량</th><th>주문</th></tr>
+    ${rows.slice(0,40).map(o=>`<tr><td${o.due&&o.due<today?` style="color:var(--risk-1);font-weight:700"`:""}>${o.due||"-"}</td><td>${esc(o.v)}</td>${codes.length?"":`<td><span class="mono">${esc(o.c)}</span> ${esc((DB.items[o.c]||{}).n||"")}</td>`}<td class="n">${fmt(o.q)}</td><td class="sm">${esc(o.no)} · ${esc(o.co)}</td></tr>`).join("")}</table>`;
+}
+function incoming(q, codes){
+  if(!DB.pos) return `<h4>입고 예정</h4>아직 발주 목록이 쉐어포인트에 없어요. 발주현황 대시보드 담당자(오정민님)가 자동 보내기를 설정하면 여기서 볼 수 있어요.`;
+  const now=new Date(), d0=x=>x.toISOString().slice(0,10);
+  let from="", to="", label="앞으로";
+  const wk=n=>{ const s=new Date(now); s.setDate(s.getDate()-((s.getDay()+6)%7)+7*n); const e=new Date(s); e.setDate(e.getDate()+6); return [d0(s),d0(e)]; };
+  if(/이번\s*주|금주/.test(q)){ [from,to]=wk(0); label="이번 주"; }
+  else if(/다음\s*주|차주/.test(q)){ [from,to]=wk(1); label="다음 주"; }
+  else { const pr=period(q,null,true); if(pr){ from=pr.from; to=pr.to; label=pr.label; } }
+  let list=(DB.pos.items||[]).filter(p=>!p.wh);
+  if(codes.length) list=list.filter(p=>codes.indexOf(p.code)>=0);
+  if(from) list=list.filter(p=>p.eta && p.eta>=from && p.eta<=to);
+  list.sort((a,b)=>(a.eta||"9999").localeCompare(b.eta||"9999"));
+  if(!list.length) return `<h4>${esc(label)} 입고 예정</h4>해당하는 입고 예정 발주가 없어요.`;
+  return `<h4>${esc(label)} 입고 예정 ${list.length}건</h4><div class="sm">발주현황 대시보드 ${esc(DB.pos.at||"")} 기준 · 입고 예정일 = 공장입고 예정 → 항구도착 → 납기요청일 순</div>
+    <table><tr><th>예정일</th><th>품목</th><th>공급사</th><th class="n">수량</th><th>상태</th></tr>
+    ${list.slice(0,40).map(p=>`<tr><td>${p.eta||"-"}</td><td><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</td><td>${esc(p.supplier)}</td><td class="n">${fmt(p.qty)}</td><td class="sm">${esc(p.kind)} · ${esc(p.status)}</td></tr>`).join("")}</table>`;
+}
+function helpHtml(){
+  return `<b>이렇게 물어보세요</b>
+    <table>
+      <tr><td>재고 · 몇 개월 버텨?</td><td><code>717062 재고</code>, <code>717062 몇 개월 버텨?</code></td></tr>
+      <tr><td>판매 순위</td><td><code>지난달 플로우텍 판매 상위 10</code>, <code>올해 대림바스 판매</code></td></tr>
+      <tr><td>품목 판매</td><td><code>717062 최근 6개월 판매</code></td></tr>
+      <tr><td>BOM 부품</td><td><code>FI4229 BOM 부족</code>, <code>FI4229 500개 만들려면?</code></td></tr>
+      <tr><td>구매 단가</td><td><code>717062 최근 구매 단가</code>, <code>태희금속 구매</code></td></tr>
+      <tr><td>확정 주문</td><td><code>대림바스 주문</code>, <code>717062 주문</code></td></tr>
+      <tr><td>입고 예정</td><td><code>이번 주 입고</code>, <code>11월 입고 예정</code></td></tr>
+    </table>
+    <div class="sm">품목코드만 써도 한눈에 보여 드려요. 코드 일부나 품명으로 써도 비슷한 품목을 찾아 드려요.</div>`;
+}
+
+/* ===================== 화면 ===================== */
+function setStatus(t){ $("#status").innerHTML=t; }
+function say(html, who){
+  const d=document.createElement("div"); d.className="msg "+who;
+  if(who==="me") d.textContent=html; else d.innerHTML=html;
+  $("#chat").appendChild(d); d.scrollIntoView({block:"end", behavior:"smooth"});
+  return d;
+}
+function ask(q){
+  if(!q.trim()) return;
+  say(q, "me");
+  let html; try{ html=answer(q); }catch(e){ console.error(e); html="답을 만들다 문제가 생겼어요: "+esc(e.message); }
+  say(html, "bot");
+}
+const CHIPS=[["사용법","도움말"],["지난달 판매 TOP10","지난달 판매 상위 10"],["플로우텍 지난달 TOP10","지난달 플로우텍 판매 상위 10"],["이번 주 입고","이번 주 입고 예정"],["확정 주문 전체","주문 전체"]];
+function renderChips(){ $("#chips").innerHTML=CHIPS.map(c=>`<button class="chip" data-q="${esc(c[1])}">${esc(c[0])}</button>`).join(""); }
+document.addEventListener("click", e=>{ const b=e.target.closest("[data-q]"); if(b){ e.preventDefault(); ask(b.dataset.q); } });
+$("#askForm").addEventListener("submit", e=>{ e.preventDefault(); const v=$("#q").value; $("#q").value=""; ask(v); });
+
+function stamp(t){ if(!t) return "-"; const d=new Date(t), p=n=>String(n).padStart(2,"0"); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+async function start(interactive){
+  const btn=$("#connBtn");
+  try{
+    btn.disabled=true; setStatus("쉐어포인트(MMS)에서 자료를 불러오는 중… 처음엔 30초쯤 걸려요.");
+    if(interactive) await MmsSp.token(true);
+    await loadAll(false);
+    const n=Object.keys(DB.items).length;
+    setStatus(`● <b>쉐어포인트(MMS) 연결됨</b> · 재고 ${stamp(DB.at["창고별재고현황"]||DB.at["재고현황"])} 기준 (불량창고 제외) · 품목 ${n.toLocaleString()}개 · 판매 ${DB.sales.length.toLocaleString()}건 · 구매 ${DB.buys.length.toLocaleString()}건 · 주문 ${DB.orders.length.toLocaleString()}건${DB.pos?` · 발주 ${(DB.pos.items||[]).length}건`:""}`);
+    btn.textContent="⟳ 새로 불러오기"; $("#q").disabled=false; $("#send").disabled=false; $("#q").focus();
+    if(!$("#chat").children.length) say("안녕하세요! 재고 · 판매 · 구매 · BOM · 주문 · 입고 예정을 물어보세요 🙂<br>"+helpHtml(), "bot");
+  }catch(e){
+    console.error(e);
+    const t=MmsSp.errorText(e);
+    setStatus("⚠ "+esc(t||"연결을 취소했어요"));
+  }finally{ btn.disabled=false; }
+}
+$("#connBtn").addEventListener("click", ()=>{ DB=null; start(true); });
+renderChips();
+(async()=>{
+  if(!window.MmsSp){ setStatus("⚠ 이 파일에서는 쉐어포인트에 연결할 수 없어요. 인터넷 주소로 열어 주세요."); return; }
+  try{ if(await MmsSp.signedIn()) start(false); else say("위의 <b>☁ 회사 계정으로 연결</b>을 눌러 회사 마이크로소프트 계정으로 로그인해 주세요. 한 번만 하면 다음부터는 바로 열려요.", "bot"); }
+  catch(e){ console.warn(e); }
+})();
+})();
+</script>
+</body>
+</html>
