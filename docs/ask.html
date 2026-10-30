@@ -274,6 +274,13 @@ const isGroup=v=>GROUPCO.indexOf(coName(v))>=0;
 const REPORTS=["품목정보","창고별재고현황","재고현황","판매현황_전체","구매현황_전체","BOM","주문서현황"];
 const PO_PATH="발주현황/발주현황.json";   // 발주현황 대시보드가 파워오토메이트로 올려 두는 발주 목록(있으면)
 let DB=null;
+// 합금 원료 · 잉곳 · 광재는 담당 품목이 아니라 기본으로 뺀다 (구매요청 대시보드와 같은 목록 + 품명에 잉곳·광재)
+// 질문에 '잉곳 포함'이라고 쓰면 넣어서 답한다.
+const ALLOY=new Set(["Zn","Al","ALB","Pb","Bi","Ni","Sn","CuP","Sb","Cu.1","Brass.1","Brass.5","C89540","C6802","Slag"].map(c=>c.toUpperCase()));
+const isAlloy=c=>{ const k=String(c||"").trim().toUpperCase(); if(ALLOY.has(k) || /^(INGOT|CHIP-)/.test(k)) return true;
+  const n=(DB && DB.items[c] && DB.items[c].n)||""; return /잉곳|광재/.test(n); };
+let INCL_ALLOY=false;
+const skip=c=>!INCL_ALLOY && isAlloy(c);
 
 function ymd(v){                      // 어떤 모양의 날짜든 'YYYY-MM-DD'
   const s=erpNorm(v).replace(/[./]/g,"-");
@@ -423,7 +430,7 @@ function guessCodes(q){            // 정확한 코드가 없으면 일부 글�
   const toks=(q.match(/[A-Za-z0-9][A-Za-z0-9._\-]{3,}/g)||[]).map(key);
   const words=(q.replace(/[A-Za-z0-9._\-]+/g," ").match(/[가-힣A-Za-z]{2,}/g)||[]).filter(w=>!STOP.test(w));
   const res=[];
-  for(const c in DB.items){ const kc=key(c), n=DB.items[c].n||"";
+  for(const c in DB.items){ if(skip(c)) continue; const kc=key(c), n=DB.items[c].n||"";
     if(toks.some(t=>kc.indexOf(t)>=0) || (words.length && words.every(w=>n.indexOf(w)>=0))) res.push(c); }
   return res;
 }
@@ -454,6 +461,7 @@ function topN(q, def){ const m=q.match(/(?:top|TOP|상위)\s*(\d+)|(\d+)\s*(?:�
 
 function answer(qRaw){
   const q=qRaw.trim();
+  INCL_ALLOY=/(잉곳|합금|광재)\s*(도\s*)?포함/.test(q);
   if(!DB) return "자료를 아직 불러오지 못했어요. 위의 <b>☁ 회사 계정으로 연결</b>을 눌러 주세요.";
   if(/^(도움|도움말|help|\?|사용법|뭘?\s*물어)/i.test(q)) return helpHtml();
   const codes=findCodes(q);
@@ -530,12 +538,12 @@ function salesTop(q, co, cust){
   const pr=period(q, {from:ymOf(monthsBack(1))+"-01", to:ymOf(new Date())+"-00", label:"지난달"});
   if(pr.to.endsWith("-00")){ const d=new Date(); d.setDate(0); pr.to=d.toISOString().slice(0,10); }
   const n=topN(q,10);
-  const rows=DB.sales.filter(r=>!r.g && r.d>=pr.from && r.d<=pr.to && (!co || r.co===co) && (!cust || coName(r.v)===coName(cust)));
+  const rows=DB.sales.filter(r=>!r.g && !skip(r.c) && r.d>=pr.from && r.d<=pr.to && (!co || r.co===co) && (!cust || coName(r.v)===coName(cust)));
   const by={}; rows.forEach(r=>{ const x=(by[r.c]=by[r.c]||{q:0,a:0}); x.q+=r.q; x.a+=r.a; });
   const list=Object.entries(by).filter(x=>x[1].q>0).sort((a,b)=>b[1].q-a[1].q).slice(0,n);
   const title=[co, cust?esc(cust)+" (판매처)":"", esc(pr.label)].filter(Boolean).join(" · ");
   if(!list.length) return `<h4>${title} 판매</h4>해당 기간 판매 기록이 없어요.`;
-  return `<h4>${title} 판매 상위 ${list.length}</h4><div class="sm">${pr.from} ~ ${pr.to} · 수량 순 · 그룹사 내부이동 제외</div>
+  return `<h4>${title} 판매 상위 ${list.length}</h4><div class="sm">${pr.from} ~ ${pr.to} · 수량 순 · 그룹사 내부이동 제외${INCL_ALLOY?"":" · 합금·잉곳·광재 제외 ('잉곳 포함'이라고 쓰면 넣어요)"}</div>
     <table><tr><th>#</th><th>품목</th><th class="n">수량</th><th class="n">금액</th></tr>
     ${list.map(([c,x],i)=>`<tr><td>${i+1}</td><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button> ${esc((DB.items[c]||{}).n||"")}</td><td class="n">${fmt(x.q)}</td><td class="n">${won(x.a)}</td></tr>`).join("")}</table>`;
 }
@@ -543,7 +551,7 @@ function purchases(codes, sup, q){
   const pr=period(q, null);
   let rows=DB.buys.filter(b=>!b.g);
   if(codes.length) rows=rows.filter(b=>codes.indexOf(b.c)>=0);
-  else if(sup) rows=rows.filter(b=>coName(b.v)===coName(sup));
+  else if(sup) rows=rows.filter(b=>coName(b.v)===coName(sup) && !skip(b.c));
   else return choose(q, "구매 단가");
   if(pr) rows=rows.filter(b=>b.d>=pr.from && b.d<=pr.to);
   rows.sort((a,b)=>b.d.localeCompare(a.d));
@@ -573,7 +581,7 @@ function bomCheck(c, q){
 function orders(codes, cust){
   let rows=DB.orders.slice();
   if(codes.length) rows=rows.filter(o=>codes.indexOf(o.c)>=0);
-  else if(cust) rows=rows.filter(o=>coName(o.v)===coName(cust));
+  else rows=rows.filter(o=>(!cust || coName(o.v)===coName(cust)) && !skip(o.c));
   rows.sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999"));
   const head=codes.length?nameOf(codes[0]):(cust?esc(cust):"전체");
   if(!rows.length) return `<h4>${head} · 확정 주문</h4>진행중인(미출고) 주문이 없어요.`;
@@ -591,7 +599,7 @@ function incoming(q, codes){
   if(/이번\s*주|금주/.test(q)){ [from,to]=wk(0); label="이번 주"; }
   else if(/다음\s*주|차주/.test(q)){ [from,to]=wk(1); label="다음 주"; }
   else { const pr=period(q,null,true); if(pr){ from=pr.from; to=pr.to; label=pr.label; } }
-  let list=(DB.pos.items||[]).filter(p=>!p.wh);
+  let list=(DB.pos.items||[]).filter(p=>!p.wh && (codes.length || !skip(p.code)));
   if(codes.length) list=list.filter(p=>codes.indexOf(p.code)>=0);
   if(from) list=list.filter(p=>p.eta && p.eta>=from && p.eta<=to);
   list.sort((a,b)=>(a.eta||"9999").localeCompare(b.eta||"9999"));
