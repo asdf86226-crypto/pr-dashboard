@@ -366,9 +366,12 @@ async function loadAll(interactive){
       const grace=new Date(); grace.setDate(grace.getDate()-30); const cut=grace.toISOString().slice(0,10);
       for(const r of rows.slice(hi+1)){
         const code=erpNorm(r[cC]); if(!code || /^합\s*계$/.test(code)) continue;
-        const st=cS!=null?erpNorm(r[cS]):""; if(/완료|종결|마감|취소/.test(st)) continue;
-        const due=cD!=null?ymd(r[cD]):""; if(due && due<cut) continue;      // 납기 30일 넘게 지난 건 나간 것으로 본다
-        db.orders.push({c:code, q:erpNum(r[cQ]), v:cV!=null?erpNorm(r[cV]):"", due, no:cNo!=null?erpNorm(r[cNo]):"", co:m.co, st});
+        const st=cS!=null?erpNorm(r[cS]):"";
+        const due=cD!=null?ymd(r[cD]):"";
+        // 완료 건과 납기가 30일 넘게 지난 진행중 건은 '나간 것'(done)으로 둔다 — 기간을 물으면 같이 보여 준다
+        const done=/완료|종결|마감|취소/.test(st) || !!(due && due<cut);
+        const no=cNo!=null?erpNorm(r[cNo]):"";
+        db.orders.push({c:code, q:erpNum(r[cQ]), v:cV!=null?erpNorm(r[cV]):"", due, no, od:ymd(no), co:m.co, st, done});
       }
     }
   }
@@ -379,7 +382,7 @@ async function loadAll(interactive){
   DB=db; idbPut("db",{sig, ver:VER, db}).catch(()=>{});
   return db;
 }
-const VER=1;
+const VER=2;
 function idb(){ return new Promise((ok,bad)=>{ const r=indexedDB.open("ask_dash",1); r.onupgradeneeded=()=>r.result.createObjectStore("kv"); r.onsuccess=()=>ok(r.result); r.onerror=()=>bad(r.error); }); }
 async function idbGet(k){ try{ const d=await idb(); return await new Promise(ok=>{ const q=d.transaction("kv").objectStore("kv").get(k); q.onsuccess=()=>ok(q.result); q.onerror=()=>ok(null); }); }catch(e){ return null; } }
 async function idbPut(k,v){ const d=await idb(); return new Promise((ok,bad)=>{ const t=d.transaction("kv","readwrite"); t.objectStore("kv").put(v,k); t.oncomplete=ok; t.onerror=()=>bad(t.error); }); }
@@ -417,7 +420,7 @@ function forecast(v){
   if(tot>0){ const mx=Math.max(...v), k=v.indexOf(mx), rest=(tot-mx)/11; if(mx>3*rest && mx>=0.3*tot && v.filter(x=>x>0).length>=8) v[k]=rest; }
   const w=v.map((_,i)=>i<3?3:(i<6?2:1)); return v.reduce((a,x,i)=>a+x*w[i],0)/w.reduce((a,b)=>a+b,0);
 }
-function openOrderQty(c){ return DB.orders.filter(o=>o.c===c).reduce((s,o)=>s+o.q,0); }
+function openOrderQty(c){ return DB.orders.filter(o=>o.c===c && !o.done).reduce((s,o)=>s+o.q,0); }
 
 /* ===================== 질문 알아듣기 ===================== */
 function findCodes(q){
@@ -444,19 +447,71 @@ function findName(list, q){
   for(const w of words){ const hit=list.filter(v=>coName(v).indexOf(w)===0); if(hit.length===1) return hit[0]; }
   return "";
 }
-// future: 입고 예정처럼 앞날을 묻는 질문 — '11월'은 올해(지났으면 내년) 11월
+// 기간 알아듣기 — 오늘·어제·그제, 이번 주·지난주, 이번 달·지난달, 올해·작년·재작년, 상반기·하반기·N분기,
+// 최근/지난 N개월·N주·N일, 2025년, 2025년 3월, 작년 3월, 3월 5일, 2025-03-05, 그리고 'A부터 B까지'·'A~B' 범위.
+// future: 입고 예정처럼 앞날을 묻는 질문 — 연도 없이 '11월'이면 올해(이미 지났으면 내년) 11월
+const DATE_RE=/(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})\s*일?|(20\d{2})\s*년\s*(\d{1,2})\s*월|(20\d{2})[.\-\/](\d{1,2})(?![.\-\/\d])|(\d{1,2})\s*월\s*(\d{1,2})\s*일|(\d{1,2})\s*월|(20\d{2})\s*년/g;
 function period(q, def, future){
-  const now=new Date(), Y=now.getFullYear(), M=now.getMonth(), d=x=>x.toISOString().slice(0,10);
+  const now=new Date(), Y=now.getFullYear(), M=now.getMonth(), D=now.getDate();
   const loc=(y,m,dd)=>{ const t=new Date(y,m,dd); return t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0"); };
-  let m;
+  const today=loc(Y,M,D);
+  const yOff=/재작년/.test(q)?-2:(/작년|전년|지난\s*해/.test(q)?-1:(/내년/.test(q)?1:0));
+  // 1) 날짜 표현을 모두 찾는다
+  const hits=[]; let m; DATE_RE.lastIndex=0;
+  while((m=DATE_RE.exec(q))){
+    let a=null;
+    if(m[1]) a={y:+m[1], mo:+m[2]-1, d:+m[3], g:"d"};
+    else if(m[4]) a={y:+m[4], mo:+m[5]-1, g:"m"};
+    else if(m[6]) a={y:+m[6], mo:+m[7]-1, g:"m"};
+    else if(m[8]) a={mo:+m[8]-1, d:+m[9], g:"d"};
+    else if(m[10]) a={mo:+m[10]-1, g:"m"};
+    else if(m[11]) a={y:+m[11], g:"y"};
+    if(!a || (a.mo!=null && (a.mo<0 || a.mo>11)) || (a.d!=null && (a.d<1 || a.d>31))) continue;
+    a.ey=a.y!=null;
+    if(a.y==null){ a.y=Y+yOff;
+      if(!yOff){ if(!future && (a.mo>M || (a.mo===M && a.d>D))) a.y--; if(future && a.mo<M) a.y++; } }
+    hits.push(a);
+  }
+  const startOf=a=> a.g==="y"?loc(a.y,0,1) : a.g==="m"?loc(a.y,a.mo,1) : loc(a.y,a.mo,a.d);
+  const endOf=a=> a.g==="y"?loc(a.y,11,31) : a.g==="m"?loc(a.y,a.mo+1,0) : loc(a.y,a.mo,a.d);
+  const lab=a=> a.g==="y"?a.y+"년" : a.g==="m"?a.y+"년 "+(a.mo+1)+"월" : a.y+"년 "+(a.mo+1)+"월 "+a.d+"일";
+  const cap=to=> (!future && to>today) ? today : to;   // 지난 자료는 오늘까지만
+  if(hits.length>=2){                                  // 'A부터 B까지' · 'A~B'
+    const a=hits[0], b=Object.assign({}, hits[hits.length-1]);
+    // 'B' 쪽에 연도가 없으면 A의 연도를 따른다 (예: 2025년 3월 1일부터 5월 31일까지)
+    if(!b.ey){ b.y=a.y; if(startOf(b)<startOf(a)) b.y++; }
+    return {from:startOf(a), to:cap(endOf(b)), label:lab(a)+" ~ "+lab(b)};
+  }
+  if(hits.length===1){
+    const a=hits[0]; let to=endOf(a);
+    return {from:startOf(a), to:cap(to), label:lab(a)};
+  }
+  // 2) 날짜 없이 말로 한 기간
+  const wk=n=>{ const s=new Date(Y,M,D-((now.getDay()+6)%7)+7*n); return [loc(s.getFullYear(),s.getMonth(),s.getDate()), loc(s.getFullYear(),s.getMonth(),s.getDate()+6)]; };
+  if((m=q.match(/(?:최근|지난|요즘)\s*(\d+)\s*개월/)) || (m=q.match(/(\d+)\s*개월\s*(?:간|동안|치)/))) return {from:loc(Y,M-(+m[1]),D+1), to:today, label:"최근 "+m[1]+"개월"};
+  if((m=q.match(/(?:최근|지난)\s*(\d+)\s*주/))) return {from:loc(Y,M,D-7*(+m[1])+1), to:today, label:"최근 "+m[1]+"주"};
+  if((m=q.match(/(?:최근|지난)\s*(\d+)\s*일/))) return {from:loc(Y,M,D-(+m[1])+1), to:today, label:"최근 "+m[1]+"일"};
+  if((m=q.match(/(?:최근|지난)\s*(\d+)\s*년/))) return {from:loc(Y-(+m[1]),M,D+1), to:today, label:"최근 "+m[1]+"년"};
+  if(/그제|그저께|엊그제/.test(q)){ const t=loc(Y,M,D-2); return {from:t, to:t, label:"그제"}; }
+  if(/어제/.test(q)){ const t=loc(Y,M,D-1); return {from:t, to:t, label:"어제"}; }
+  if(/내일/.test(q)){ const t=loc(Y,M,D+1); return {from:t, to:t, label:"내일"}; }
+  if(/오늘|금일/.test(q)) return {from:today, to:today, label:"오늘"};
+  if(/지난\s*주|저번\s*주|전주/.test(q)){ const [a,b]=wk(-1); return {from:a, to:b, label:"지난주"}; }
+  if(/이번\s*주|금주/.test(q)){ const [a,b]=wk(0); return {from:a, to:future?b:cap(b), label:"이번 주"}; }
+  if(/다음\s*주|차주/.test(q)){ const [a,b]=wk(1); return {from:a, to:b, label:"다음 주"}; }
   if(/지난\s*달|전월|저번\s*달/.test(q)) return {from:loc(Y,M-1,1), to:loc(Y,M,0), label:"지난달"};
-  if(/이번\s*달|이달|금월/.test(q)) return {from:loc(Y,M,1), to:loc(Y,M,now.getDate()), label:"이번 달"};
-  if(/작년|전년|지난\s*해/.test(q)) return {from:(Y-1)+"-01-01", to:(Y-1)+"-12-31", label:(Y-1)+"년"};
-  if(/올해|금년|이번\s*해/.test(q)) return {from:Y+"-01-01", to:loc(Y,M,now.getDate()), label:Y+"년"};
-  if((m=q.match(/최근\s*(\d+)\s*개월/))) return {from:loc(Y,M-(+m[1]),now.getDate()+1), to:loc(Y,M,now.getDate()), label:"최근 "+m[1]+"개월"};
-  if((m=q.match(/(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월/))){ let y=m[1]?+m[1]:Y, mm=+m[2]-1; if(!m[1] && !future && mm>M) y--; if(!m[1] && future && mm<M) y++; return {from:loc(y,mm,1), to:loc(y,mm+1,0), label:y+"년 "+(mm+1)+"월"}; }
+  if(/다음\s*달|내달|익월/.test(q)) return {from:loc(Y,M+1,1), to:loc(Y,M+2,0), label:"다음 달"};
+  if(/이번\s*달|이달|금월/.test(q)) return {from:loc(Y,M,1), to:future?loc(Y,M+1,0):today, label:"이번 달"};
+  const yy=Y+yOff;
+  if((m=q.match(/([1-4])\s*분기/))){ const k=+m[1]-1; return {from:loc(yy,k*3,1), to:cap(loc(yy,k*3+3,0)), label:yy+"년 "+m[1]+"분기"}; }
+  if(/상반기/.test(q)) return {from:loc(yy,0,1), to:cap(loc(yy,6,0)), label:yy+"년 상반기"};
+  if(/하반기/.test(q)) return {from:loc(yy,6,1), to:cap(loc(yy,12,0)), label:yy+"년 하반기"};
+  if(yOff) return {from:loc(yy,0,1), to:cap(loc(yy,12,0)), label:yy+"년"};
+  if(/올해|금년|이번\s*해/.test(q)) return {from:loc(Y,0,1), to:future?loc(Y,12,0):today, label:Y+"년"};
   return def;
 }
+// 품목코드를 찾을 때 날짜 표현(2025-03-05, 10월 등)이 코드로 읽히지 않게 지운다
+const noDates=q=>q.replace(DATE_RE," ");
 function topN(q, def){ const m=q.match(/(?:top|TOP|상위)\s*(\d+)|(\d+)\s*(?:위|개|등)/); return m ? Math.min(50, +(m[1]||m[2])) : def; }
 
 function answer(qRaw){
@@ -464,18 +519,25 @@ function answer(qRaw){
   INCL_ALLOY=/(잉곳|합금|광재)\s*(도\s*)?포함/.test(q);
   if(!DB) return "자료를 아직 불러오지 못했어요. 위의 <b>☁ 회사 계정으로 연결</b>을 눌러 주세요.";
   if(/^(도움|도움말|help|\?|사용법|뭘?\s*물어)/i.test(q)) return helpHtml();
-  const codes=findCodes(q);
+  const codes=findCodes(noDates(q));
   const co=/플로우텍|플로텍|flowtech/i.test(q) ? "플로우텍" : (/태성/.test(q) ? "태성정밀" : "");
   const want={
     inc:/입고|들어오|들어와|도착|입고\s*예정/.test(q),
     bom:/bom|구성품|만들|생산\s*가능|부품\s*(부족|모자)|(부족|모자란)\s*부품/i.test(q),
     ord:/주문|수주|오더|미출고|확정/.test(q),
+    po:/발주/.test(q),                              // 발주서 — 거래처(판매처)가 보낸 건 주문서, 공급사에 낸 건 발주현황
     buy:/구매|매입|단가|샀|사온|입고가|매입가/.test(q),
     sale:/판매|팔|매출|출고|순위|상위|top|많이/i.test(q),
     stock:/재고|몇\s*개|버텨|버틸|소진|남았|남아/.test(q),
   };
+  if(want.po && !want.ord){
+    const custList=DB.cust.concat(DB.orders.map(o=>o.v));
+    const cust=findName(custList, q);
+    if(cust) return orders(codes, cust, q);                   // 대림바스 발주서 = 우리가 받은 주문서
+    return incoming(q, codes, true);                          // 공급사(우리가 낸) 발주
+  }
   if(want.inc && !want.buy) return incoming(q, codes);
-  if(want.ord){ const cust=findName(DB.cust.concat(DB.orders.map(o=>o.v)), q); return orders(codes, cust); }
+  if(want.ord){ const cust=findName(DB.cust.concat(DB.orders.map(o=>o.v)), q); return orders(codes, cust, q); }
   if(want.buy){ const sup=findName(DB.supp, q); return purchases(codes, sup, q); }
   if(want.bom){ if(!codes.length) return choose(q, "BOM"); return bomCheck(codes[0], q); }
   if(want.sale && (!codes.length || /순위|상위|top|많이/i.test(q))){ const cust=findName(DB.cust, q); return salesTop(q, co, cust); }
@@ -592,35 +654,41 @@ function bomCheck(c, q){
     ${rows.map(r=>`<tr><td><span class="mono">${esc(r.ch)}</span> ${esc((DB.items[r.ch]||{}).n||"")}</td><td class="n">${fmt(r.per)}</td><td class="n">${fmt(r.s)}</td><td class="n">${r.can===max?`<b style="color:var(--risk-1)">${fmt(r.can)}</b>`:fmt(r.can)}</td>${want?`<td class="n">${r.need?`<b style="color:var(--risk-1)">${fmt(r.need)}</b>`:"-"}</td>`:""}</tr>`).join("")}</table>
     <div class="sm">"${esc(c)} 500개 만들려면?"처럼 물으면 부족 수량을 계산해요.</div>`;
 }
-function orders(codes, cust){
+function orders(codes, cust, q){
+  const pr=period(q||"", null);
   let rows=DB.orders.slice();
   if(codes.length) rows=rows.filter(o=>codes.indexOf(o.c)>=0);
   else rows=rows.filter(o=>(!cust || coName(o.v)===coName(cust)) && !skip(o.c));
-  rows.sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999"));
-  const head=codes.length?nameOf(codes[0]):(cust?esc(cust):"전체");
-  if(!rows.length) return `<h4>${head} · 확정 주문</h4>진행중인(미출고) 주문이 없어요.`;
-  const today=new Date().toISOString().slice(0,10);
-  return `<h4>${head} · 확정 주문(미출고) ${rows.length}건 · ${fmt(rows.reduce((s,o)=>s+o.q,0))}개</h4>
-    <div class="sm">주문서현황 기준 · 완료 건과 납기가 30일 넘게 지난 건은 뺐어요</div>
-    <table><tr><th>납기</th><th>거래처</th>${codes.length?"":"<th>품목</th>"}<th class="n">수량</th><th>주문</th></tr>
-    ${rows.slice(0,40).map(o=>`<tr><td${o.due&&o.due<today?` style="color:var(--risk-1);font-weight:700"`:""}>${o.due||"-"}</td><td>${esc(o.v)}</td>${codes.length?"":`<td><span class="mono">${esc(o.c)}</span> ${esc((DB.items[o.c]||{}).n||"")}</td>`}<td class="n">${fmt(o.q)}</td><td class="sm">${esc(o.no)} · ${esc(o.co)}</td></tr>`).join("")}</table>`;
+  // 기간을 물으면 그 기간에 받은 주문(주문일자 기준)을 완료 건까지, 아니면 진행중(미출고)만
+  if(pr) rows=rows.filter(o=>{ const d=o.od||o.due; return d && d>=pr.from && d<=pr.to; });
+  else rows=rows.filter(o=>!o.done);
+  rows.sort((a,b)=>pr ? (b.od||"").localeCompare(a.od||"") : (a.due||"9999").localeCompare(b.due||"9999"));
+  const head=(codes.length?nameOf(codes[0]):(cust?esc(cust):"전체"))+(pr?" · "+esc(pr.label):"");
+  if(!rows.length) return `<h4>${head} · 주문</h4>${pr?"그 기간에 받은 주문이 없어요.":"진행중인(미출고) 주문이 없어요."}`;
+  const today=new Date().toISOString().slice(0,10), tot=rows.reduce((s,o)=>s+o.q,0);
+  return `<h4>${head} · ${pr?"받은 주문":"확정 주문(미출고)"} ${rows.length}건 · ${fmt(tot)}개</h4>
+    <div class="sm">주문서현황 기준${pr?` · ${pr.from} ~ ${pr.to} 주문일자 · 완료 건 포함`:" · 완료 건과 납기가 30일 넘게 지난 건은 뺐어요"}</div>
+    <table><tr>${pr?"<th>주문일</th>":""}<th>납기</th><th>거래처</th>${codes.length?"":"<th>품목</th>"}<th class="n">수량</th><th>상태</th><th>주문</th></tr>
+    ${rows.slice(0,60).map(o=>`<tr>${pr?`<td>${o.od||"-"}</td>`:""}<td${!o.done&&o.due&&o.due<today?` style="color:var(--risk-1);font-weight:700"`:""}>${o.due||"-"}</td><td>${esc(o.v)}</td>${codes.length?"":`<td><span class="mono">${esc(o.c)}</span> ${esc((DB.items[o.c]||{}).n||"")}</td>`}<td class="n">${fmt(o.q)}</td><td class="sm">${esc(o.st||(o.done?"완료":"진행중"))}</td><td class="sm">${esc(o.no)} · ${esc(o.co)}</td></tr>`).join("")}</table>
+    ${rows.length>60?`<div class="sm">외 ${rows.length-60}건</div>`:""}`;
 }
-function incoming(q, codes){
-  if(!DB.pos) return `<h4>입고 예정</h4>아직 발주 목록이 쉐어포인트에 없어요. 발주현황 대시보드 담당자(오정민님)가 자동 보내기를 설정하면 여기서 볼 수 있어요.`;
-  const now=new Date(), d0=x=>x.toISOString().slice(0,10);
-  let from="", to="", label="앞으로";
-  const wk=n=>{ const s=new Date(now); s.setDate(s.getDate()-((s.getDay()+6)%7)+7*n); const e=new Date(s); e.setDate(e.getDate()+6); return [d0(s),d0(e)]; };
-  if(/이번\s*주|금주/.test(q)){ [from,to]=wk(0); label="이번 주"; }
-  else if(/다음\s*주|차주/.test(q)){ [from,to]=wk(1); label="다음 주"; }
-  else { const pr=period(q,null,true); if(pr){ from=pr.from; to=pr.to; label=pr.label; } }
-  let list=(DB.pos.items||[]).filter(p=>!p.wh && (codes.length || !skip(p.code)));
+function incoming(q, codes, poMode){
+  if(!DB.pos) return `<h4>${poMode?"발주 현황":"입고 예정"}</h4>아직 발주 목록이 쉐어포인트에 없어요. 발주현황 대시보드 담당자(오정민님)가 자동 보내기를 설정하면 여기서 볼 수 있어요.`;
+  const pr=period(q, null, true);
+  const all=DB.pos.items||[];
+  const sup=findName([...new Set(all.map(p=>p.supplier).filter(Boolean))], q);
+  let list=all.filter(p=>!p.wh && (codes.length || !skip(p.code)));
   if(codes.length) list=list.filter(p=>codes.indexOf(p.code)>=0);
-  if(from) list=list.filter(p=>p.eta && p.eta>=from && p.eta<=to);
+  if(sup) list=list.filter(p=>coName(p.supplier)===coName(sup));
+  if(pr) list=list.filter(p=>p.eta && p.eta>=pr.from && p.eta<=pr.to);
   list.sort((a,b)=>(a.eta||"9999").localeCompare(b.eta||"9999"));
-  if(!list.length) return `<h4>${esc(label)} 입고 예정</h4>해당하는 입고 예정 발주가 없어요.`;
-  return `<h4>${esc(label)} 입고 예정 ${list.length}건</h4><div class="sm">발주현황 대시보드 ${esc(DB.pos.at||"")} 기준 · 입고 예정일 = 공장입고 예정 → 항구도착 → 납기요청일 순</div>
+  const label=[sup?esc(sup):"", pr?esc(pr.label):(poMode?"진행중":"앞으로")].filter(Boolean).join(" · ");
+  const what=poMode?"발주(입고 전)":"입고 예정";
+  if(!list.length) return `<h4>${label} ${what}</h4>해당하는 발주가 없어요.`;
+  return `<h4>${label} ${what} ${list.length}건</h4><div class="sm">발주현황 대시보드 ${esc(DB.pos.at||"")} 기준 · 입고 예정일 = 공장입고 예정 → 항구도착 → 납기요청일 순${pr?` · ${pr.from} ~ ${pr.to}`:""}</div>
     <table><tr><th>예정일</th><th>품목</th><th>공급사</th><th class="n">수량</th><th>상태</th></tr>
-    ${list.slice(0,40).map(p=>`<tr><td>${p.eta||"-"}</td><td><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</td><td>${esc(p.supplier)}</td><td class="n">${fmt(p.qty)}</td><td class="sm">${esc(p.kind)} · ${esc(p.status)}</td></tr>`).join("")}</table>`;
+    ${list.slice(0,60).map(p=>`<tr><td>${p.eta||"-"}</td><td><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</td><td>${esc(p.supplier)}</td><td class="n">${fmt(p.qty)}</td><td class="sm">${esc(p.kind)} · ${esc(p.status)}</td></tr>`).join("")}</table>
+    ${list.length>60?`<div class="sm">외 ${list.length-60}건</div>`:""}`;
 }
 function helpHtml(){
   return `<b>이렇게 물어보세요</b>
@@ -631,9 +699,12 @@ function helpHtml(){
       <tr><td>BOM 부품</td><td><code>FI4229 BOM 부족</code>, <code>FI4229 500개 만들려면?</code></td></tr>
       <tr><td>구매 단가</td><td><code>717062 최근 구매 단가</code>, <code>태희금속 구매</code></td></tr>
       <tr><td>확정 주문</td><td><code>대림바스 주문</code>, <code>717062 주문</code></td></tr>
-      <tr><td>입고 예정</td><td><code>이번 주 입고</code>, <code>11월 입고 예정</code></td></tr>
+      <tr><td>입고 예정 · 발주</td><td><code>이번 주 입고</code>, <code>11월 입고 예정</code>, <code>Huihang 발주</code></td></tr>
+      <tr><td>받은 주문서</td><td><code>대림바스 발주서현황</code>, <code>대림바스 지난달 주문</code></td></tr>
     </table>
-    <div class="sm">품목코드만 써도 한눈에 보여 드려요. 코드 일부나 품명으로 써도 비슷한 품목을 찾아 드려요.</div>`;
+    <div class="sm">품목코드만 써도 한눈에 보여 드려요. 코드 일부나 품명으로 써도 비슷한 품목을 찾아 드려요.<br>
+      <b>기간</b>도 붙일 수 있어요: 오늘 · 어제 · 그제 · 이번 주 · 지난주 · 이번 달 · 지난달 · 올해 · 작년 · 상반기 · 3분기 ·
+      지난 5개월 · 최근 2주 · 2025년 · 작년 3월 · 2025년 3월 1일부터 5월 31일까지 · 2025-03-01~2025-04-15</div>`;
 }
 
 /* ===================== 화면 ===================== */
@@ -663,7 +734,7 @@ async function start(interactive){
     if(interactive) await MmsSp.token(true);
     await loadAll(false);
     const n=Object.keys(DB.items).length;
-    setStatus(`● <b>쉐어포인트(MMS) 연결됨</b> · 재고 ${stamp(DB.at["창고별재고현황"]||DB.at["재고현황"])} 기준 (불량창고 제외) · 품목 ${n.toLocaleString()}개 · 판매 ${DB.sales.length.toLocaleString()}건 · 구매 ${DB.buys.length.toLocaleString()}건 · 주문 ${DB.orders.length.toLocaleString()}건${DB.pos?` · 발주 ${(DB.pos.items||[]).length}건`:""}`);
+    setStatus(`● <b>쉐어포인트(MMS) 연결됨</b> · 재고 ${stamp(DB.at["창고별재고현황"]||DB.at["재고현황"])} 기준 (불량창고 제외) · 품목 ${n.toLocaleString()}개 · 판매 ${DB.sales.length.toLocaleString()}건 · 구매 ${DB.buys.length.toLocaleString()}건 · 주문 ${DB.orders.filter(o=>!o.done).length.toLocaleString()}건${DB.pos?` · 발주 ${(DB.pos.items||[]).length}건`:""}`);
     btn.textContent="⟳ 새로 불러오기"; $("#q").disabled=false; $("#send").disabled=false; $("#q").focus();
     if(!$("#chat").children.length) say("안녕하세요! 재고 · 판매 · 구매 · BOM · 주문 · 입고 예정을 물어보세요 🙂<br>"+helpHtml(), "bot");
   }catch(e){
