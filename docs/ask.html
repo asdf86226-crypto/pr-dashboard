@@ -606,8 +606,8 @@ function salesTop(q, co, cust){
   const title=[co, cust?esc(cust)+" (판매처)":"", esc(pr.label)].filter(Boolean).join(" · ");
   if(!list.length) return `<h4>${title} 판매</h4>해당 기간 판매 기록이 없어요.`;
   return `<h4>${title} 판매 상위 ${list.length}</h4><div class="sm">${pr.from} ~ ${pr.to} · 수량 순 · 그룹사 내부이동 제외${INCL_ALLOY?"":" · 합금·잉곳·광재 제외 ('잉곳 포함'이라고 쓰면 넣어요)"}</div>
-    <table><tr><th>#</th><th>품목</th><th class="n">수량</th><th class="n">금액</th></tr>
-    ${list.map(([c,x],i)=>`<tr><td>${i+1}</td><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button> ${esc((DB.items[c]||{}).n||"")}</td><td class="n">${fmt(x.q)}</td><td class="n">${won(x.a)}</td></tr>`).join("")}</table>`;
+    <table><tr><th class="n" style="width:46px">순위</th><th>품목</th><th class="n">수량</th><th class="n">금액</th></tr>
+    ${list.map(([c,x],i)=>`<tr><td class="n">${i+1}</td><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button> ${esc((DB.items[c]||{}).n||"")}</td><td class="n">${fmt(x.q)}</td><td class="n">${won(x.a)}</td></tr>`).join("")}</table>`;
 }
 function purchases(codes, sup, q){
   const pr=period(q, null);
