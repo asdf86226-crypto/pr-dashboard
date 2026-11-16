@@ -538,7 +538,7 @@ function answer(qRaw){
   }
   if(want.inc && !want.buy) return incoming(q, codes);
   if(want.ord){ const cust=findName(DB.cust.concat(DB.orders.map(o=>o.v)), q); return orders(codes, cust, q); }
-  if(want.buy){ const sup=findName(DB.supp, q); return purchases(codes, sup, q); }
+  if(want.buy){ const sup=findName(DB.supp, q); return purchases(codes, sup, q, co); }
   if(want.bom){ if(!codes.length) return choose(q, "BOM"); return bomCheck(codes[0], q); }
   if(want.sale && (!codes.length || /순위|상위|top|많이/i.test(q))){ const cust=findName(DB.cust, q); return salesTop(q, co, cust); }
   if(want.sale) return itemSales(codes[0], q);
@@ -609,22 +609,23 @@ function salesTop(q, co, cust){
     <table><tr><th class="n" style="width:46px">순위</th><th>품목</th><th class="n">수량</th><th class="n">금액</th></tr>
     ${list.map(([c,x],i)=>`<tr><td class="n">${i+1}</td><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button> ${esc((DB.items[c]||{}).n||"")}</td><td class="n">${fmt(x.q)}</td><td class="n">${won(x.a)}</td></tr>`).join("")}</table>`;
 }
-function purchases(codes, sup, q){
+function purchases(codes, sup, q, co){
+  if(co && sup && coName(sup).indexOf(co.slice(0,2))>=0) co="";   // 구매처 이름의 '태성'(예: 태성산업)을 회사로 읽지 않게
   const pr=period(q, null);
-  let rows=DB.buys.filter(b=>!b.g);
+  let rows=DB.buys.filter(b=>!b.g && (!co || b.co===co));      // '태성 …' · '플로우텍 …'이라고 쓰면 그 회사 구매만
   if(codes.length) rows=rows.filter(b=>codes.indexOf(b.c)>=0);
   else if(sup) rows=rows.filter(b=>coName(b.v)===coName(sup) && !skip(b.c));
   else return choose(q, "구매 단가");
   if(pr) rows=rows.filter(b=>b.d>=pr.from && b.d<=pr.to);
   rows.sort((a,b)=>b.d.localeCompare(a.d));
-  const head=codes.length ? nameOf(codes[0]) : esc(sup)+" (구매처)";
+  const head=(co?co+" · ":"")+(codes.length ? nameOf(codes[0]) : esc(sup)+" (구매처)");
   if(!rows.length) return `<h4>${head} 구매</h4>구매 기록이 없어요 (그룹사 사이 거래 제외).`;
   const show=rows.slice(0,codes.length?10:20);
   const sum=rows.reduce((a,b)=>a+b.a,0);
   return `<h4>${head} · 최근 구매${pr?" ("+esc(pr.label)+")":""}</h4>
     ${codes.length?`<div class="big">${won(krwUnit(rows[0]))}<span class="sm"> /개 (원화) · ${fxNote(rows[0])}최근 ${rows[0].d} · ${esc(rows[0].v)}</span></div>`:""}
     <table><tr><th>일자</th>${codes.length?"":"<th>품목</th>"}<th>구매처</th><th class="n">수량</th><th class="n">단가(원화)</th><th class="n">외화 단가</th><th class="n">공급가액</th><th>회사</th></tr>
-    ${show.map(b=>`<tr><td>${b.d}</td>${codes.length?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(krwUnit(b))}</td><td class="n">${fxCell(b)}</td><td class="n">${won(b.a)}</td><td class="sm">${esc(b.co)}</td></tr>`).join("")}</table>
+    ${show.map(b=>`<tr><td style="white-space:nowrap">${b.d}</td>${codes.length?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(krwUnit(b))}</td><td class="n">${fxCell(b)}</td><td class="n">${won(b.a)}</td><td class="sm" style="white-space:nowrap">${esc(b.co)}</td></tr>`).join("")}</table>
     <div class="sm">공급가액 합계 ${won(sum)} (${rows.length}건) · 해외 구매는 이카운트 공급가액(원화) ÷ 수량으로 원화 단가를 보여 드리고, 외화 단가와 비교해 달러($)·위안(¥)을 구분했어요</div>
     ${rows.length>show.length?`<div class="sm">외 ${rows.length-show.length}건</div>`:""}`;
 }
