@@ -524,6 +524,8 @@ function answer(qRaw){
     if(!extra || /재고/.test(extra)) return stockTable(lp.codes, "");
     return lp.codes.slice(0,8).map(c=>answer(c+" "+extra)).join("<hr>");
   }
+  // 품목코드 목록: '조하 품목코드 리스트' · '조하 등록된 제품 품목코드' · '반제품 목록'
+  if(/품목\s*코드|코드\s*(리스트|목록)|리스트|목록|등록된|등록\s*품목/.test(q) && !/재고|판매|구매|주문|입고|발주|bom/i.test(q)) return itemList(q);
   const codes=findCodes(noDates(q));
   // 코드 앞부분만 쓴 경우(717088) — 그 코드가 들어가는 품목(717088.0 · .B · .BN …)을 모두 묶어서 답한다
   const fam=codes.length?[]:famCodes(q);
@@ -625,6 +627,26 @@ function itemSales(c, q){
     ${months.length>1?`<div class="bar">${months.map(m=>`<i style="height:${(byM[m]/mx*100).toFixed(0)}%" title="${m} ${fmt(byM[m])}개"></i>`).join("")}</div>
       <div class="barx">${months.map(m=>`<span>${+m.slice(5)}월</span>`).join("")}</div>`:""}
     ${top.length?`<table><tr><th>판매처</th><th class="n">수량</th></tr>${top.map(x=>`<tr><td>${esc(x[0]||"-")}</td><td class="n">${fmt(x[1])}</td></tr>`).join("")}</table>`:""}`;
+}
+// 품목코드 목록 — 품명(또는 코드)에 검색어가 들어간 품목을 품목구분과 함께. '제품'·'반제품' 등을 쓰면 그 구분만.
+const KINDS=["반제품","원재료","부재료","제품","상품"];
+function itemList(q){
+  const kind=KINDS.find(k=>new RegExp(k).test(q.replace(/품목\s*코드/g," ")));   // '반제품'이 '제품'보다 먼저 걸리게
+  const words=(q.replace(/품목\s*코드|코드|리스트|목록|등록된|등록|품목|알려\s*줘?|보여\s*줘?|주세요|전체|모든|반제품|원재료|부재료|제품|상품/g," ")
+    .match(/[가-힣A-Za-z0-9._\-]{2,}/g)||[]).filter(w=>!STOP.test(w));
+  let list=Object.keys(DB.items).filter(c=>{ const it=DB.items[c];
+    if(kind && (it.k||"")!==kind) return false;
+    const hay=(c+" "+(it.n||"")).toUpperCase();
+    return words.every(w=>hay.indexOf(w.toUpperCase())>=0) && (words.length || kind) && !skip(c); }).sort();
+  const title=[words.join(" "), kind].filter(Boolean).join(" · ")||"전체";
+  if(!words.length && !kind) return `어떤 품목 목록을 볼까요? 품명이나 구분을 같이 써 주세요. 예) <code>조하 품목코드 리스트</code>, <code>반제품 목록</code>`;
+  if(!list.length) return `<h4>${esc(title)} 품목코드</h4>찾는 품목이 없어요. 품명 일부를 바꿔서 써 보세요.`;
+  LAST_PICK={codes:list, intent:""};
+  const show=list.slice(0,200);
+  return `<h4>${esc(title)} 품목코드 ${list.length}개</h4><div class="sm">이카운트 품목정보 기준 · 재고는 불량창고 제외 · 코드를 누르면 자세히 보여 드려요</div>
+    <table><tr><th>품목코드</th><th>품명</th><th>구분</th><th class="n">재고</th></tr>
+    ${show.map(c=>{ const it=DB.items[c]; return `<tr><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button></td><td>${esc(it.n||"")}</td><td class="sm">${esc(it.k||"")}</td><td class="n">${it.hasS?fmt(it.s):"-"}</td></tr>`; }).join("")}</table>
+    ${list.length>200?`<div class="sm">외 ${list.length-200}개 — 검색어를 더 자세히 써 주세요</div>`:""}`;
 }
 // 코드 앞부분(4글자 이상)으로 품목 묶음 찾기 — 717088 → 717088.0 · 717088.B …
 function famCodes(q){
@@ -737,6 +759,7 @@ function helpHtml(){
       <tr><td>구매 단가</td><td><code>717062 최근 구매 단가</code>, <code>태희금속 구매</code></td></tr>
       <tr><td>확정 주문</td><td><code>대림바스 주문</code>, <code>717062 주문</code></td></tr>
       <tr><td>입고 예정 · 발주</td><td><code>이번 주 입고</code>, <code>11월 입고 예정</code>, <code>Huihang 발주</code></td></tr>
+      <tr><td>품목코드 목록</td><td><code>조하 품목코드 리스트</code>, <code>조하 등록된 제품 품목코드</code>, <code>반제품 목록</code></td></tr>
       <tr><td>받은 주문서</td><td><code>대림바스 발주서현황</code>, <code>대림바스 지난달 주문</code></td></tr>
     </table>
     <div class="sm">품목코드만 써도 한눈에 보여 드려요. 코드 일부나 품명으로 써도 비슷한 품목을 찾아 드려요.<br>
