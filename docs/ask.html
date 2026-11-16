@@ -519,7 +519,15 @@ function answer(qRaw){
   INCL_ALLOY=/(잉곳|합금|광재)\s*(도\s*)?포함/.test(q);
   if(!DB) return "자료를 아직 불러오지 못했어요. 위의 <b>☁ 회사 계정으로 연결</b>을 눌러 주세요.";
   if(/^(도움|도움말|help|\?|사용법|뭘?\s*물어)/i.test(q)) return helpHtml();
+  if(LAST_PICK && /^(모든|전부|모두|다)\s*(품목|제품|보기|보여|$)/.test(q.replace(/\s+/g," ").trim())){
+    const lp=LAST_PICK; const extra=q.replace(/^(모든|전부|모두|다)\s*(품목|제품)?/,"").trim()||lp.intent||"";
+    if(!extra || /재고/.test(extra)) return stockTable(lp.codes, "");
+    return lp.codes.slice(0,8).map(c=>answer(c+" "+extra)).join("<hr>");
+  }
   const codes=findCodes(noDates(q));
+  // 코드 앞부분만 쓴 경우(717088) — 그 코드가 들어가는 품목(717088.0 · .B · .BN …)을 모두 묶어서 답한다
+  const fam=codes.length?[]:famCodes(q);
+  if(fam.length>1) LAST_PICK={codes:fam, intent:""};
   const co=/플로우텍|플로텍|flowtech/i.test(q) ? "플로우텍" : (/태성/.test(q) ? "태성정밀" : "");
   const want={
     inc:/입고|들어오|들어와|도착|입고\s*예정/.test(q),
@@ -533,26 +541,48 @@ function answer(qRaw){
   if(want.po && !want.ord){
     const custList=DB.cust.concat(DB.orders.map(o=>o.v));
     const cust=findName(custList, q);
-    if(cust) return orders(codes, cust, q);                   // 대림바스 발주서 = 우리가 받은 주문서
-    return incoming(q, codes, true);                          // 공급사(우리가 낸) 발주
+    if(cust) return orders(codes.length?codes:fam, cust, q);  // 대림바스 발주서 = 우리가 받은 주문서
+    return incoming(q, codes.length?codes:fam, true);         // 공급사(우리가 낸) 발주
   }
-  if(want.inc && !want.buy) return incoming(q, codes);
-  if(want.ord){ const cust=findName(DB.cust.concat(DB.orders.map(o=>o.v)), q); return orders(codes, cust, q); }
-  if(want.buy){ const sup=findName(DB.supp, q); return purchases(codes, sup, q, co); }
+  const cf=codes.length?codes:fam;
+  if(want.inc && !want.buy) return incoming(q, cf);
+  if(want.ord){ const cust=findName(DB.cust.concat(DB.orders.map(o=>o.v)), q); return orders(cf, cust, q); }
+  if(want.buy){ const sup=findName(DB.supp, q); return purchases(cf, sup, q, co); }
   if(want.bom){ if(!codes.length) return choose(q, "BOM"); return bomCheck(codes[0], q); }
+  if(want.sale && fam.length) return salesTop(q, co, findName(DB.cust, q), fam);
   if(want.sale && (!codes.length || /순위|상위|top|많이/i.test(q))){ const cust=findName(DB.cust, q); return salesTop(q, co, cust); }
   if(want.sale) return itemSales(codes[0], q);
-  if(want.stock){ if(!codes.length) return choose(q, "재고"); return codes.map(stockCard).join("<hr>"); }
+  if(want.stock){ if(fam.length) return stockTable(fam, q); if(!codes.length) return choose(q, "재고"); return codes.map(stockCard).join("<hr>"); }
   if(codes.length) return overview(codes[0]);
+  if(fam.length) return stockTable(fam, q);
   const cust=findName(DB.cust, q); if(cust) return salesTop(q, co, cust);
   const g=guessCodes(q); if(g.length) return choose(q, "");
   return "무슨 말인지 잘 모르겠어요 😅<br>" + helpHtml();
 }
+let LAST_PICK=null;      // 마지막으로 고르게 했던 품목들 — "모든 품목" · "전부"라고 하면 한꺼번에 보여 준다
 function choose(q, intent){
-  const g=guessCodes(q).slice(0,12);
+  const all=guessCodes(q), g=all.slice(0,12);
   if(!g.length) return `어떤 품목인지 찾지 못했어요. <b>품목코드</b>를 같이 써 주세요. 예) <code>717062 ${intent||"재고"}</code>`;
   if(g.length===1) return answer(g[0]+" "+q);
-  return `어느 품목인가요? 눌러 주세요.<div class="pick">${g.map(c=>`<button class="chip" data-q="${esc(c+" "+(intent||""))}">${esc(c)} · ${esc((DB.items[c]||{}).n||"")}</button>`).join("")}</div>`;
+  // 재고는 고르게 하지 않고, 코드가 들어가는 품목(색상·사양별)을 한 표로 보여 준다
+  if(intent==="재고") return stockTable(all, q);
+  LAST_PICK={codes:all, intent};
+  return `어느 품목인가요? 눌러 주세요.<div class="pick">${g.map(c=>`<button class="chip" data-q="${esc(c+" "+(intent||""))}">${esc(c)} · ${esc((DB.items[c]||{}).n||"")}</button>`).join("")}
+    <button class="chip" data-q="모든 품목 ${esc(intent||"")}">📋 모두 보기 (${all.length})</button></div>`;
+}
+// 여러 품목 재고를 한 표로 (예: 717088 → 717088.0 · .B · .BN …)
+function stockTable(codes, q){
+  const rows=codes.slice(0,60).map(c=>{ const it=DB.items[c]||{}, f=forecast(demand()[c]), oc=openOrderQty(c), free=(it.s||0)-oc;
+    return {c, n:it.n||"", s:it.s||0, f, oc, cover:f>0?Math.max(0,free)/f:null}; });
+  const tot=rows.reduce((a,r)=>a+r.s,0), totF=rows.reduce((a,r)=>a+r.f,0);
+  const tag=r=> r.cover==null ? "" : r.cover<2 ? `<span class="tag red">위험</span>` : r.cover<4 ? `<span class="tag amb">주의</span>` : `<span class="tag ok">여유</span>`;
+  return `<h4>${esc((q||"").replace(/재고.*$/,"").trim()||String(codes[0]||"").split(".")[0])} 관련 품목 ${rows.length}개 · 재고 합계 ${fmt(tot)}개</h4>
+    <div class="sm">불량창고 제외 · 월 예측 합계 ${fmt(totF)}개 · 품목코드를 누르면 자세히 보여 드려요</div>
+    <table><tr><th>품목</th><th class="n">재고</th><th class="n">월 예측</th><th class="n">확정 주문</th><th class="n">버틸 기간</th></tr>
+    ${rows.map(r=>`<tr><td><button class="chip" data-q="${esc(r.c)} 재고" style="padding:2px 8px">${esc(r.c)}</button> ${esc(r.n)}</td>
+      <td class="n"><b>${fmt(r.s)}</b></td><td class="n">${fmt(r.f)}</td><td class="n">${r.oc?fmt(r.oc):"-"}</td>
+      <td class="n">${r.cover==null?"-":(r.cover>99?"99개월+":fmt(r.cover)+"개월")}${tag(r)}</td></tr>`).join("")}</table>
+    ${codes.length>60?`<div class="sm">외 ${codes.length-60}개 — 코드를 더 자세히 써 주세요</div>`:""}`;
 }
 function nameOf(c){ const it=DB.items[c]||{}; return `<span class="mono">${esc(c)}</span> ${esc(it.n||"")}`; }
 
@@ -596,14 +626,20 @@ function itemSales(c, q){
       <div class="barx">${months.map(m=>`<span>${+m.slice(5)}월</span>`).join("")}</div>`:""}
     ${top.length?`<table><tr><th>판매처</th><th class="n">수량</th></tr>${top.map(x=>`<tr><td>${esc(x[0]||"-")}</td><td class="n">${fmt(x[1])}</td></tr>`).join("")}</table>`:""}`;
 }
-function salesTop(q, co, cust){
+// 코드 앞부분(4글자 이상)으로 품목 묶음 찾기 — 717088 → 717088.0 · 717088.B …
+function famCodes(q){
+  const toks=(noDates(q).match(/[A-Za-z0-9][A-Za-z0-9._\-]{3,}/g)||[]).map(key);
+  if(!toks.length) return [];
+  return Object.keys(DB.items).filter(c=>{ const k=key(c); return toks.some(t=>k.indexOf(t)===0) && !skip(c); }).sort();
+}
+function salesTop(q, co, cust, only){
   const pr=period(q, {from:ymOf(monthsBack(1))+"-01", to:ymOf(new Date())+"-00", label:"지난달"});
   if(pr.to.endsWith("-00")){ const d=new Date(); d.setDate(0); pr.to=d.toISOString().slice(0,10); }
   const n=topN(q,10);
-  const rows=DB.sales.filter(r=>!r.g && !skip(r.c) && r.d>=pr.from && r.d<=pr.to && (!co || r.co===co) && (!cust || coName(r.v)===coName(cust)));
+  const rows=DB.sales.filter(r=>!r.g && !skip(r.c) && r.d>=pr.from && r.d<=pr.to && (!co || r.co===co) && (!cust || coName(r.v)===coName(cust)) && (!only || only.indexOf(r.c)>=0));
   const by={}; rows.forEach(r=>{ const x=(by[r.c]=by[r.c]||{q:0,a:0}); x.q+=r.q; x.a+=r.a; });
   const list=Object.entries(by).filter(x=>x[1].q>0).sort((a,b)=>b[1].q-a[1].q).slice(0,n);
-  const title=[co, cust?esc(cust)+" (판매처)":"", esc(pr.label)].filter(Boolean).join(" · ");
+  const title=[co, cust?esc(cust)+" (판매처)":"", only?esc(only[0].split(".")[0])+" 관련 품목":"", esc(pr.label)].filter(Boolean).join(" · ");
   if(!list.length) return `<h4>${title} 판매</h4>해당 기간 판매 기록이 없어요.`;
   return `<h4>${title} 판매 상위 ${list.length}</h4><div class="sm">${pr.from} ~ ${pr.to} · 수량 순 · 그룹사 내부이동 제외${INCL_ALLOY?"":" · 합금·잉곳·광재 제외 ('잉곳 포함'이라고 쓰면 넣어요)"}</div>
     <table><tr><th class="n" style="width:46px">순위</th><th>품목</th><th class="n">수량</th><th class="n">금액</th></tr>
@@ -618,14 +654,14 @@ function purchases(codes, sup, q, co){
   else return choose(q, "구매 단가");
   if(pr) rows=rows.filter(b=>b.d>=pr.from && b.d<=pr.to);
   rows.sort((a,b)=>b.d.localeCompare(a.d));
-  const head=(co?co+" · ":"")+(codes.length ? nameOf(codes[0]) : esc(sup)+" (구매처)");
+  const head=(co?co+" · ":"")+(codes.length>1 ? esc(codes[0].split(".")[0])+" 관련 품목 "+codes.length+"개" : codes.length ? nameOf(codes[0]) : esc(sup)+" (구매처)");
   if(!rows.length) return `<h4>${head} 구매</h4>구매 기록이 없어요 (그룹사 사이 거래 제외).`;
-  const show=rows.slice(0,codes.length?10:20);
+  const show=rows.slice(0,codes.length===1?10:20);
   const sum=rows.reduce((a,b)=>a+b.a,0);
   return `<h4>${head} · 최근 구매${pr?" ("+esc(pr.label)+")":""}</h4>
-    ${codes.length?`<div class="big">${won(krwUnit(rows[0]))}<span class="sm"> /개 (원화) · ${fxNote(rows[0])}최근 ${rows[0].d} · ${esc(rows[0].v)}</span></div>`:""}
-    <table><tr><th>일자</th>${codes.length?"":"<th>품목</th>"}<th>구매처</th><th class="n">수량</th><th class="n">단가(원화)</th><th class="n">외화 단가</th><th class="n">공급가액</th><th>회사</th></tr>
-    ${show.map(b=>`<tr><td style="white-space:nowrap">${b.d}</td>${codes.length?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(krwUnit(b))}</td><td class="n">${fxCell(b)}</td><td class="n">${won(b.a)}</td><td class="sm" style="white-space:nowrap">${esc(b.co)}</td></tr>`).join("")}</table>
+    ${codes.length===1?`<div class="big">${won(krwUnit(rows[0]))}<span class="sm"> /개 (원화) · ${fxNote(rows[0])}최근 ${rows[0].d} · ${esc(rows[0].v)}</span></div>`:""}
+    <table><tr><th>일자</th>${codes.length===1?"":"<th>품목</th>"}<th>구매처</th><th class="n">수량</th><th class="n">단가(원화)</th><th class="n">외화 단가</th><th class="n">공급가액</th><th>회사</th></tr>
+    ${show.map(b=>`<tr><td style="white-space:nowrap">${b.d}</td>${codes.length===1?"":`<td><span class="mono">${esc(b.c)}</span> ${esc((DB.items[b.c]||{}).n||"")}</td>`}<td>${esc(b.v)}</td><td class="n">${fmt(b.q)}</td><td class="n">${won(krwUnit(b))}</td><td class="n">${fxCell(b)}</td><td class="n">${won(b.a)}</td><td class="sm" style="white-space:nowrap">${esc(b.co)}</td></tr>`).join("")}</table>
     <div class="sm">공급가액 합계 ${won(sum)} (${rows.length}건) · 해외 구매는 이카운트 공급가액(원화) ÷ 수량으로 원화 단가를 보여 드리고, 외화 단가와 비교해 달러($)·위안(¥)을 구분했어요</div>
     ${rows.length>show.length?`<div class="sm">외 ${rows.length-show.length}건</div>`:""}`;
 }
@@ -664,13 +700,13 @@ function orders(codes, cust, q){
   if(pr) rows=rows.filter(o=>{ const d=o.od||o.due; return d && d>=pr.from && d<=pr.to; });
   else rows=rows.filter(o=>!o.done);
   rows.sort((a,b)=>pr ? (b.od||"").localeCompare(a.od||"") : (a.due||"9999").localeCompare(b.due||"9999"));
-  const head=(codes.length?nameOf(codes[0]):(cust?esc(cust):"전체"))+(pr?" · "+esc(pr.label):"");
+  const head=(codes.length>1?esc(codes[0].split(".")[0])+" 관련 품목":codes.length?nameOf(codes[0]):(cust?esc(cust):"전체"))+(pr?" · "+esc(pr.label):"");
   if(!rows.length) return `<h4>${head} · 주문</h4>${pr?"그 기간에 받은 주문이 없어요.":"진행중인(미출고) 주문이 없어요."}`;
   const today=new Date().toISOString().slice(0,10), tot=rows.reduce((s,o)=>s+o.q,0);
   return `<h4>${head} · ${pr?"받은 주문":"확정 주문(미출고)"} ${rows.length}건 · ${fmt(tot)}개</h4>
     <div class="sm">주문서현황 기준${pr?` · ${pr.from} ~ ${pr.to} 주문일자 · 완료 건 포함`:" · 완료 건과 납기가 30일 넘게 지난 건은 뺐어요"}</div>
-    <table><tr>${pr?"<th>주문일</th>":""}<th>납기</th><th>거래처</th>${codes.length?"":"<th>품목</th>"}<th class="n">수량</th><th>상태</th><th>주문</th></tr>
-    ${rows.slice(0,60).map(o=>`<tr>${pr?`<td>${o.od||"-"}</td>`:""}<td${!o.done&&o.due&&o.due<today?` style="color:var(--risk-1);font-weight:700"`:""}>${o.due||"-"}</td><td>${esc(o.v)}</td>${codes.length?"":`<td><span class="mono">${esc(o.c)}</span> ${esc((DB.items[o.c]||{}).n||"")}</td>`}<td class="n">${fmt(o.q)}</td><td class="sm">${esc(o.st||(o.done?"완료":"진행중"))}</td><td class="sm">${esc(o.no)} · ${esc(o.co)}</td></tr>`).join("")}</table>
+    <table><tr>${pr?"<th>주문일</th>":""}<th>납기</th><th>거래처</th>${codes.length===1?"":"<th>품목</th>"}<th class="n">수량</th><th>상태</th><th>주문</th></tr>
+    ${rows.slice(0,60).map(o=>`<tr>${pr?`<td>${o.od||"-"}</td>`:""}<td${!o.done&&o.due&&o.due<today?` style="color:var(--risk-1);font-weight:700"`:""}>${o.due||"-"}</td><td>${esc(o.v)}</td>${codes.length===1?"":`<td><span class="mono">${esc(o.c)}</span> ${esc((DB.items[o.c]||{}).n||"")}</td>`}<td class="n">${fmt(o.q)}</td><td class="sm">${esc(o.st||(o.done?"완료":"진행중"))}</td><td class="sm">${esc(o.no)} · ${esc(o.co)}</td></tr>`).join("")}</table>
     ${rows.length>60?`<div class="sm">외 ${rows.length-60}건</div>`:""}`;
 }
 function incoming(q, codes, poMode){
