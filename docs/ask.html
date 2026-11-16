@@ -634,9 +634,11 @@ function itemList(q){
   const kind=KINDS.find(k=>new RegExp(k).test(q.replace(/품목\s*코드/g," ")));   // '반제품'이 '제품'보다 먼저 걸리게
   const words=(q.replace(/품목\s*코드|코드|리스트|목록|등록된|등록|품목|알려\s*줘?|보여\s*줘?|주세요|전체|모든|반제품|원재료|부재료|제품|상품/g," ")
     .match(/[가-힣A-Za-z0-9._\-]{2,}/g)||[]).filter(w=>!STOP.test(w));
+  const bs=buySuppliers();
   let list=Object.keys(DB.items).filter(c=>{ const it=DB.items[c];
     if(kind && (it.k||"")!==kind) return false;
-    const hay=(c+" "+(it.n||"")).toUpperCase();
+    // 품명·코드뿐 아니라 구매처(품목정보의 구매처명 + 실제 구매한 곳)로도 찾는다 — '조하 품목코드' = 조하에서 사는 품목
+    const hay=(c+" "+(it.n||"")+" "+(it.b||"")+" "+(bs[c]||[]).join(" ")).toUpperCase();
     return words.every(w=>hay.indexOf(w.toUpperCase())>=0) && (words.length || kind) && !skip(c); }).sort();
   const title=[words.join(" "), kind].filter(Boolean).join(" · ")||"전체";
   if(!words.length && !kind) return `어떤 품목 목록을 볼까요? 품명이나 구분을 같이 써 주세요. 예) <code>조하 품목코드 리스트</code>, <code>반제품 목록</code>`;
@@ -644,9 +646,17 @@ function itemList(q){
   LAST_PICK={codes:list, intent:""};
   const show=list.slice(0,200);
   return `<h4>${esc(title)} 품목코드 ${list.length}개</h4><div class="sm">이카운트 품목정보 기준 · 재고는 불량창고 제외 · 코드를 누르면 자세히 보여 드려요</div>
-    <table><tr><th>품목코드</th><th>품명</th><th>구분</th><th class="n">재고</th></tr>
-    ${show.map(c=>{ const it=DB.items[c]; return `<tr><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button></td><td>${esc(it.n||"")}</td><td class="sm">${esc(it.k||"")}</td><td class="n">${it.hasS?fmt(it.s):"-"}</td></tr>`; }).join("")}</table>
+    <table><tr><th>품목코드</th><th>품명</th><th>구분</th><th>구매처</th><th class="n">재고</th></tr>
+    ${show.map(c=>{ const it=DB.items[c]; const sup=[...new Set([it.b].concat(bs[c]||[]).filter(Boolean))].join(" · ");
+      return `<tr><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button></td><td>${esc(it.n||"")}</td><td class="sm">${esc(it.k||"")}</td><td class="sm">${esc(sup)}</td><td class="n">${it.hasS?fmt(it.s):"-"}</td></tr>`; }).join("")}</table>
     ${list.length>200?`<div class="sm">외 ${list.length-200}개 — 검색어를 더 자세히 써 주세요</div>`:""}`;
+}
+// 품목코드 → 실제로 구매한 구매처들 (구매현황, 그룹사 거래 제외)
+let BUYSUP=null;
+function buySuppliers(){
+  if(BUYSUP && BUYSUP.db===DB) return BUYSUP.m;
+  const m={}; DB.buys.forEach(b=>{ if(b.g || !b.v) return; const a=(m[b.c]=m[b.c]||[]); if(a.indexOf(b.v)<0) a.push(b.v); });
+  BUYSUP={db:DB, m}; return m;
 }
 // 코드 앞부분(4글자 이상)으로 품목 묶음 찾기 — 717088 → 717088.0 · 717088.B …
 function famCodes(q){
