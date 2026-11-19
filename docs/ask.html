@@ -531,6 +531,8 @@ function answer(qRaw){
   }
   // 품목코드 목록: '조하 품목코드 리스트' · '조하 등록된 제품 품목코드' · '반제품 목록'
   if(/품목\s*코드|코드\s*(리스트|목록)|리스트|목록|등록된|등록\s*품목/.test(q) && !/재고|판매|구매|주문|입고|발주|bom/i.test(q)) return itemList(q);
+  // 월 마감금액: '10월 마감금액' · '대림바스 10월 마감' · '태희금속 지난달 매입 마감'
+  if(/마감/.test(q)) return closing(q);
   const codes=findCodes(noDates(q));
   // 코드 앞부분만 쓴 경우(717088) — 그 코드가 들어가는 품목(717088.0 · .B · .BN …)을 모두 묶어서 답한다
   const fam=codes.length?[]:famCodes(q);
@@ -766,6 +768,36 @@ function incoming(q, codes, poMode){
     ${list.slice(0,60).map(p=>`<tr><td>${p.eta||"-"}</td><td><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</td><td>${esc(p.supplier)}</td><td class="n">${fmt(p.qty)}</td><td class="sm">${esc(p.kind)} · ${esc(p.status)}</td></tr>`).join("")}</table>
     ${list.length>60?`<div class="sm">외 ${list.length-60}건</div>`:""}`;
 }
+// 월 마감금액 — 기간 안 판매(매출)·구매(매입) 공급가액을 거래처별로 합친다 (그룹사 내부거래 제외)
+function closing(q){
+  const pr=period(q, {from:"", to:"", label:""});
+  let from=pr&&pr.from, to=pr&&pr.to, label=pr&&pr.label;
+  if(!from){ const n=new Date(), a=new Date(n.getFullYear(), n.getMonth()-1, 1), b=new Date(n.getFullYear(), n.getMonth(), 0);
+    const f=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    from=f(a); to=f(b); label="지난달"; }
+  const co=/플로우텍|플로텍|flowtech/i.test(q) ? "플로우텍" : (/태성/.test(q) ? "태성정밀" : "");
+  const onlySale=/판매|매출/.test(q) && !/구매|매입/.test(q), onlyBuy=/구매|매입/.test(q) && !/판매|매출/.test(q);
+  const cust=onlyBuy?"":findName(DB.cust, q), sup=onlySale?"":findName(DB.supp, q);
+  const showSale=!onlyBuy && (!sup || cust), showBuy=!onlySale && (!cust || sup);
+  const cos=co?[co]:["태성정밀","플로우텍"];
+  const block=(rows, who, kind)=>{
+    rows=rows.filter(r=>!r.g && r.d>=from && r.d<=to && (!who || coName(r.v)===coName(who)));
+    const out=cos.map(c=>{
+      const rr=rows.filter(r=>r.co===c); if(!rr.length) return "";
+      const by={}; rr.forEach(r=>{ const k=r.v||"-"; (by[k]=by[k]||{a:0,n:0}).a+=r.a; by[k].n++; });
+      const list=Object.entries(by).sort((x,y)=>y[1].a-x[1].a), tot=rr.reduce((t,r)=>t+r.a,0);
+      return `<div style="margin-top:8px"><b>${c}</b> · ${kind} 공급가액 <b>${won(tot)}</b> <span class="sm">(부가세 포함 약 ${won(tot*1.1)}${c==="플로우텍"&&kind==="구매"?" · 해외 구매는 부가세 없음":""})</span></div>
+        <table><tr><th>${kind==="판매"?"판매처":"구매처"}</th><th class="n">건수</th><th class="n">공급가액</th></tr>
+        ${list.slice(0,who?1:30).map(([v,x])=>`<tr><td>${esc(v)}</td><td class="n">${fmt(x.n)}</td><td class="n">${won(x.a)}</td></tr>`).join("")}</table>
+        ${list.length>30&&!who?`<div class="sm">외 ${list.length-30}곳</div>`:""}`;
+    }).join("");
+    return out || `<div class="sm" style="margin-top:8px">${kind} 기록이 없어요.</div>`;
+  };
+  return `<h4>${esc(cust||sup||"")}${(cust||sup)?" · ":""}${esc(label)} 마감금액</h4>
+    <div class="sm">${from} ~ ${to} · 이카운트 판매현황·구매현황의 공급가액 합계 · 그룹사 내부거래 제외</div>
+    ${showSale?`<div style="margin-top:10px;font-weight:700">📤 판매(매출)</div>${block(DB.sales, cust, "판매")}`:""}
+    ${showBuy?`<div style="margin-top:14px;font-weight:700">📥 구매(매입)</div>${block(DB.buys, sup, "구매")}`:""}`;
+}
 function helpHtml(){
   return `<b>이렇게 물어보세요</b>
     <table>
@@ -777,6 +809,7 @@ function helpHtml(){
       <tr><td>확정 주문</td><td><code>대림바스 주문</code>, <code>717062 주문</code></td></tr>
       <tr><td>입고 예정 · 발주</td><td><code>이번 주 입고</code>, <code>11월 입고 예정</code>, <code>Huihang 발주</code></td></tr>
       <tr><td>품목코드 목록</td><td><code>조하 품목코드 리스트</code>, <code>조하 등록된 제품 품목코드</code>, <code>반제품 목록</code></td></tr>
+      <tr><td>월 마감금액</td><td><code>10월 마감금액</code>, <code>대림바스 10월 마감</code>, <code>태희금속 지난달 매입 마감</code></td></tr>
       <tr><td>받은 주문서</td><td><code>대림바스 발주서현황</code>, <code>대림바스 지난달 주문</code></td></tr>
     </table>
     <div class="sm">품목코드만 써도 한눈에 보여 드려요. 코드 일부나 품명으로 써도 비슷한 품목을 찾아 드려요.<br>
