@@ -451,7 +451,12 @@ function findName(list, q){
 // 최근/지난 N개월·N주·N일, 2025년, 2025년 3월, 작년 3월, 3월 5일, 2025-03-05, 그리고 'A부터 B까지'·'A~B' 범위.
 // future: 입고 예정처럼 앞날을 묻는 질문 — 연도 없이 '11월'이면 올해(이미 지났으면 내년) 11월
 const DATE_RE=/(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})\s*일?|(20\d{2})\s*년\s*(\d{1,2})\s*월|(20\d{2})[.\-\/](\d{1,2})(?![.\-\/\d])|(\d{1,2})\s*월\s*(\d{1,2})\s*일|(\d{1,2})\s*월|(20\d{2})\s*년/g;
+// '24년' → '2024년', '24~25년' · '2024~2025년' → 'XXXX년~XXXX년' (두 자리 연도와 범위)
+const normYears=q=>String(q)
+  .replace(/(^|[^\d])((?:20)?\d{2})\s*[~\-]\s*((?:20)?\d{2})\s*년/g, (_,p,a,b)=>p+(a.length===2?"20"+a:a)+"년~"+(b.length===2?"20"+b:b)+"년")
+  .replace(/(^|[^\d])(\d{2})\s*년/g, (_,p,a)=>p+"20"+a+"년");
 function period(q, def, future){
+  q=normYears(q);
   const now=new Date(), Y=now.getFullYear(), M=now.getMonth(), D=now.getDate();
   const loc=(y,m,dd)=>{ const t=new Date(y,m,dd); return t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0"); };
   const today=loc(Y,M,D);
@@ -511,7 +516,7 @@ function period(q, def, future){
   return def;
 }
 // 품목코드를 찾을 때 날짜 표현(2025-03-05, 10월 등)이 코드로 읽히지 않게 지운다
-const noDates=q=>q.replace(DATE_RE," ");
+const noDates=q=>normYears(q).replace(DATE_RE," ");
 function topN(q, def){ const m=q.match(/(?:top|TOP|상위)\s*(\d+)|(\d+)\s*(?:위|개|등)/); return m ? Math.min(50, +(m[1]||m[2])) : def; }
 
 function answer(qRaw){
@@ -619,13 +624,15 @@ function itemSales(c, q){
   const rows=DB.sales.filter(r=>r.c===c && !r.g && r.d>=pr.from && r.d<=pr.to);
   const tot=rows.reduce((s,r)=>s+r.q,0), amt=rows.reduce((s,r)=>s+r.a,0);
   const byM={}; rows.forEach(r=>byM[r.d.slice(0,7)]=(byM[r.d.slice(0,7)]||0)+r.q);
-  const months=Object.keys(byM).sort(); const mx=Math.max(1,...months.map(m=>byM[m]));
+  // 판매 없는 달도 빈 막대로 보여 준다 (기간 안의 모든 달)
+  const months=[]; for(let y=+pr.from.slice(0,4), mo=+pr.from.slice(5,7); y*12+mo <= +pr.to.slice(0,4)*12 + +pr.to.slice(5,7) && months.length<60; mo++){ if(mo>12){mo=1;y++;} months.push(y+"-"+String(mo).padStart(2,"0")); }
+  const mx=Math.max(1,...months.map(m=>byM[m]||0)), multiY=months.length>12;
   const byV={}; rows.forEach(r=>byV[r.v]=(byV[r.v]||0)+r.q);
   const top=Object.entries(byV).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,5);
   return `<h4>${nameOf(c)} · ${esc(pr.label)} 판매</h4>
     <div class="big">${fmt(tot)}개</div><div class="sm">${pr.from} ~ ${pr.to} · 금액 ${won(amt)} · ${rows.length}건 (그룹사 내부이동 제외)</div>
-    ${months.length>1?`<div class="bar">${months.map(m=>`<i style="height:${(byM[m]/mx*100).toFixed(0)}%" title="${m} ${fmt(byM[m])}개"></i>`).join("")}</div>
-      <div class="barx">${months.map(m=>`<span>${+m.slice(5)}월</span>`).join("")}</div>`:""}
+    ${months.length>1?`<div class="bar">${months.map(m=>`<i style="height:${((byM[m]||0)/mx*100).toFixed(0)}%" title="${m} ${fmt(byM[m]||0)}개"></i>`).join("")}</div>
+      <div class="barx">${months.map(m=>`<span>${multiY ? (+m.slice(5)===1||m===months[0] ? m.slice(2,4)+"."+(+m.slice(5)) : (+m.slice(5)%3===1 ? +m.slice(5) : "")) : +m.slice(5)+"월"}</span>`).join("")}</div>`:""}
     ${top.length?`<table><tr><th>판매처</th><th class="n">수량</th></tr>${top.map(x=>`<tr><td>${esc(x[0]||"-")}</td><td class="n">${fmt(x[1])}</td></tr>`).join("")}</table>`:""}`;
 }
 // 품목코드 목록 — 품명(또는 코드)에 검색어가 들어간 품목을 품목구분과 함께. '제품'·'반제품' 등을 쓰면 그 구분만.
