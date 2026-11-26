@@ -3410,7 +3410,7 @@ function uploadDoc_(b){
    * 판매량은 그룹사(태성정밀↔플로우텍) 내부이동을 뺀 값 — ERP 월평균 소요량과 같은 기준. 내부이동은 따로 보여준다.
    * '최근 N개월'은 ERP 계산과 같게 이번 달을 포함한 N개 달의 1일부터 오늘까지. */
   const SAL_REPORT="판매현황_전체";
-  const SAL_VER=2;   // 저장 형식 — 바뀌면 파일이 그대로여도 다시 받는다 (2: 판매처 추가)
+  const SAL_VER=3;   // 저장 형식 — 바뀌면 파일이 그대로여도 다시 받는다 (2: 판매처 추가 · 3: 판매금액 추가)
   let salIdx=null, salMeta=null, salBusy=null;
   let salDbP=null;
   function salDb(){
@@ -3440,6 +3440,7 @@ function uploadDoc_(b){
     const cC=m["품목코드"], cQ=m["수량"],
           cN=erpCol(m,["품목명","품명","품목명(규격)","품목명[규격]"]),
           cV=erpCol(m,["거래처명","거래처","판매처명","판매처"]),
+          cA=erpCol(m,["공급가액","금액","판매금액"]),
           cD=erpCol(m,["일자","일 자","날짜","판매일자","매출일자","출고일자","전표일자"]) ?? erpColLike(m,["일자","날짜"]);
     if(cD==null) throw new Error("판매현황에 일자 열이 없습니다");
     let n=0;
@@ -3447,7 +3448,7 @@ function uploadDoc_(b){
       const r=rows[i]||[]; const code=erpNorm(r[cC]); if(!code || /^합\s*계$/.test(code)) continue;
       const q=erpNum(r[cQ]); if(!q) continue;
       const d=salYmd(r[cD]); if(!d) continue;
-      const k=erpKey(code), it=idx[k] || (idx[k]={c:code, n:"", d:[], q:[], f:[]});
+      const k=erpKey(code), it=idx[k] || (idx[k]={c:code, n:"", d:[], q:[], f:[], a:[]});
       if(!it.n && cN!=null) it.n=erpNorm(r[cN]);
       const vk = cV!=null ? erpCo(r[cV]) : "";
       const inter = vk && GROUPCO.indexOf(vk)>=0;
@@ -3455,7 +3456,7 @@ function uploadDoc_(b){
       let vi = cust.ix[vk];
       if(vi==null){ vi = cust.ix[vk] = cust.names.length; cust.names.push(vk ? erpNorm(r[cV]) : "(판매처 없음)"); }
       if(!it.v) it.v=[];
-      it.d.push(d); it.q.push(q); it.f.push(ci + (inter?2:0)); it.v.push(vi);
+      it.d.push(d); it.q.push(q); it.f.push(ci + (inter?2:0)); it.v.push(vi); it.a.push(cA!=null ? erpNum(r[cA]) : 0);
       n++;
     }
     return n;
@@ -3518,24 +3519,25 @@ function uploadDoc_(b){
     return salBusy;
   }
   function salSum(it, from, to){
-    const r={ext:0, inter:0, co:[0,0], cnt:0, by:{}};
+    const r={ext:0, inter:0, co:[0,0], cnt:0, by:{}, amt:0, byA:{}};
     if(!it) return r;
     for(let i=0;i<it.d.length;i++){
       const d=it.d[i]; if(d<from || d>to) continue;
       const q=it.q[i], f=it.f[i];
       if(f>=2){ r.inter+=q; continue; }
-      r.ext+=q; r.co[f]+=q; r.cnt++;
-      if(it.v){ const v=it.v[i]; r.by[v]=(r.by[v]||0)+q; }
+      const a=(it.a && it.a[i]) || 0;
+      r.ext+=q; r.co[f]+=q; r.cnt++; r.amt+=a;
+      if(it.v){ const v=it.v[i]; r.by[v]=(r.by[v]||0)+q; r.byA[v]=(r.byA[v]||0)+a; }
     }
     return r;
   }
   // 판매처 순위 (반품으로 합이 0 이하인 곳은 뺀다)
   function salTop(r, n){
     const names=(salMeta && salMeta.cust) || [], fmt=v=>(Math.round(v*100)/100).toLocaleString();
-    const list=Object.keys(r.by).map(k=>({v:names[k]||"-", q:r.by[k]})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q).slice(0,n);
+    const list=Object.keys(r.by).map(k=>({v:names[k]||"-", q:r.by[k], a:(r.byA||{})[k]||0})).filter(x=>x.q>0).sort((a,b)=>b.q-a.q).slice(0,n);
     if(!list.length) return "";
     return `<ol class="sal-top">${list.map((x,i)=>`<li><span class="rk">${i+1}</span><span class="nm" title="${esc(x.v)}">${esc(x.v)}</span>`
-      + `<span class="q">${fmt(x.q)}</span><span class="pc">${r.ext>0?Math.round(x.q/r.ext*100)+"%":""}</span></li>`).join("")}</ol>`;
+      + `<span class="q">${fmt(x.q)}${x.a?`<span style="display:block;font-weight:500;font-size:10.5px;color:var(--muted)">₩${Math.round(x.a).toLocaleString()}</span>`:""}</span><span class="pc">${r.ext>0?Math.round(x.q/r.ext*100)+"%":""}</span></li>`).join("")}</ol>`;
   }
   // 온라인에서 이 품번을 파는 곳 찾기 — 쇼핑몰 사이트 내용은 브라우저가 직접 읽을 수 없어(보안 정책) 검색 결과 링크로 연다.
   // 색상 꼬리(.BN · .CP 등)를 뺀 품번으로 올린 판매처도 많아 그 검색도 같이 둔다.
@@ -3555,8 +3557,8 @@ function uploadDoc_(b){
     const fmt=v=>(Math.round(v*100)/100).toLocaleString();
     const months=[]; let y=fy, m=fm;
     while(y*100+m<=ym(to)){ months.push(y*100+m); m++; if(m>12){ m=1; y++; } }
-    const shown=months.slice(-24), sum={}, byV={};
-    for(let i=0;i<it.d.length;i++){ const d=it.d[i]; if(d<from||d>to||it.f[i]>=2) continue; const k=ym(d); sum[k]=(sum[k]||0)+it.q[i];
+    const shown=months.slice(-24), sum={}, byV={}, amt={};
+    for(let i=0;i<it.d.length;i++){ const d=it.d[i]; if(d<from||d>to||it.f[i]>=2) continue; const k=ym(d); sum[k]=(sum[k]||0)+it.q[i]; amt[k]=(amt[k]||0)+((it.a&&it.a[i])||0);
       if(it.v){ const o=(byV[k]=byV[k]||{}); o[it.v[i]]=(o[it.v[i]]||0)+it.q[i]; } }
     const names=(salMeta && salMeta.cust) || [], TOPV=8;
     // 그 달 업체별 수량 (많은 순, 반품으로 0 이하인 곳은 뺀다)
@@ -3572,7 +3574,7 @@ function uploadDoc_(b){
     const step=shown.length>18?3:(shown.length>12?2:1);
     const bars=shown.map((k,i)=>{ const h=max>0?vals[i]/max*100:0;
       return `<div class="b"><i style="height:${h.toFixed(1)}%"></i>${i===imax&&max>0?`<span class="v" style="bottom:calc(${h.toFixed(1)}% + 2px)">${fmt(max)}</span>`:""}`
-        + `<span class="tip ${i<shown.length/3?"l":(i>=shown.length*2/3?"r":"")}"><span class="h">${String(k).slice(0,4)}.${String(k).slice(4)} · ${fmt(vals[i])}개</span>${custTip(k)}</span></div>`; }).join("");
+        + `<span class="tip ${i<shown.length/3?"l":(i>=shown.length*2/3?"r":"")}"><span class="h">${String(k).slice(0,4)}.${String(k).slice(4)} · ${fmt(vals[i])}개${amt[k]?` · ₩${Math.round(amt[k]).toLocaleString()}`:""}</span>${custTip(k)}</span></div>`; }).join("");
     const xl=shown.map((k,i)=>{ const mm=k%100; const lab=(i%step===0||i===shown.length-1)?(mm===1||i===0?`${String(k).slice(2,4)}.${mm}`:`${mm}월`):"";
       return `<span>${lab}</span>`; }).join("");
     return `<div class="sal-mon"><div class="t">월별 판매량</div>
@@ -3615,10 +3617,10 @@ function uploadDoc_(b){
     const kp=[12,6,3].map(n=>{ const a=salRecent(n), s=salSum(it, a, today);
       return `<div class="ord-kpi"><div class="lb">최근 ${n}개월 <span style="font-weight:600">(${salYmdStr(a).slice(0,7)} ~ 오늘)</span></div>
         <div class="vl">${fmt(s.ext)}<span class="u">개</span></div>
-        <div class="sb">월평균 ${fmt(s.ext/n)}${s.inter?` · 내부이동 ${fmt(s.inter)} 별도`:""}</div>${salTop(s,3)}</div>`; }).join("");
+        <div class="sb">월평균 ${fmt(s.ext/n)}${s.amt?` · 금액 ₩${Math.round(s.amt).toLocaleString()}`:""}${s.inter?` · 내부이동 ${fmt(s.inter)} 별도`:""}</div>${salTop(s,3)}</div>`; }).join("");
     out.innerHTML=`<div class="sal-res"><div class="sal-row"><div class="l">
         <div class="it"><b>${esc(it.c)}</b>${name?" · "+esc(name):""}</div>
-        <div class="big">${fmt(r.ext)}<span class="u">개</span></div>
+        <div class="big">${fmt(r.ext)}<span class="u">개</span>${r.amt?`<span style="font-size:17px;font-weight:700;margin-left:14px;color:var(--ink)">₩${Math.round(r.amt).toLocaleString()}</span><span class="u"> 판매금액(공급가액)</span>`:""}</div>
         <div class="sub">${salYmdStr(from)} ~ ${salYmdStr(Math.min(to, today))} 판매량 · ${co} · 판매 ${r.cnt.toLocaleString()}건${r.inter?` · 그룹사 내부이동 ${fmt(r.inter)}개는 제외`:""}</div>
         ${r.ext>0?`<div class="sub" style="margin-top:10px; font-weight:700; color:var(--ink)">판매처 순위</div>${salTop(r,5)}`:""}
       </div>${salMonthly(it, from, Math.min(to, today))}${salWeb(it.c)}</div></div>
