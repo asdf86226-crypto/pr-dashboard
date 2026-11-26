@@ -89,6 +89,9 @@
   .msg.bot table{border-collapse:collapse; margin:6px 0 2px; font-size:12.5px; width:100%}
   .msg.bot th{background:var(--surface-2); color:var(--muted); font-weight:700; text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); white-space:nowrap}
   .msg.bot td{padding:5px 8px; border-bottom:1px solid var(--border); vertical-align:top}
+  /* 날짜·거래처·수량은 한 줄로 — 품목(코드+품명) 칸만 줄바꿈 */
+  .msg.bot td{white-space:nowrap}
+  .msg.bot td:has(.mono), .msg.bot td:has(.chip), .msg.bot td:has(code), .msg.bot td.wrap{white-space:normal; min-width:180px}
   .msg.bot td.n, .msg.bot th.n{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
   .msg.bot .mono{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px}
   .msg.bot .tag{display:inline-block; font-size:11px; font-weight:800; padding:1px 8px; border-radius:999px; margin-left:4px}
@@ -657,7 +660,7 @@ function itemList(q){
   return `<h4>${esc(title)} 품목코드 ${list.length}개</h4><div class="sm">이카운트 품목정보 기준 · 재고는 불량창고 제외 · 코드를 누르면 자세히 보여 드려요</div>
     <table><tr><th>품목코드</th><th>품명</th><th>구분</th><th>구매처</th><th class="n">재고</th></tr>
     ${show.map(c=>{ const it=DB.items[c]; const sup=[...new Set([it.b].concat(bs[c]||[]).filter(Boolean))].join(" · ");
-      return `<tr><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button></td><td>${esc(it.n||"")}</td><td class="sm">${esc(it.k||"")}</td><td class="sm">${esc(sup)}</td><td class="n">${it.hasS?fmt(it.s):"-"}</td></tr>`; }).join("")}</table>
+      return `<tr><td><button class="chip" data-q="${esc(c)}" style="padding:2px 8px">${esc(c)}</button></td><td class="wrap">${esc(it.n||"")}</td><td class="sm">${esc(it.k||"")}</td><td class="sm wrap">${esc(sup)}</td><td class="n">${it.hasS?fmt(it.s):"-"}</td></tr>`; }).join("")}</table>
     ${list.length>200?`<div class="sm">외 ${list.length-200}개 — 검색어를 더 자세히 써 주세요</div>`:""}`;
 }
 // 품목코드 → 실제로 구매한 구매처들 (구매현황, 그룹사 거래 제외)
