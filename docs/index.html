@@ -3601,6 +3601,9 @@ function uploadDoc_(b){
     if(!salIdx){ out.innerHTML=`<div class="ord-note">판매현황을 아직 받지 못했습니다.</div>`; return; }
     const from=salYmd($("#salFrom").value)||19000101, to=salYmd($("#salTo").value)||99991231;
     if(from>to){ out.innerHTML=`<div class="ord-note">시작일이 종료일보다 늦습니다.</div>`; return; }
+    // 목록에서 여러 품목을 체크해 '선택 품목 보기'를 누른 경우: 품목별 + 맨 아래 합계
+    if(salSel && salSel.q===code){ out.innerHTML=salMultiHtml(salSel.codes, from, to); salBindBack(); return; }
+    salSel=null;
     let it=isAlloy(code) ? null : salIdx[erpKey(code)];
     if(!it){
       // 품목코드를 다 치지 않았으면 비슷한 코드를 찾아 고르게 한다 (하나뿐이면 바로 그 품목)
@@ -3611,6 +3614,10 @@ function uploadDoc_(b){
     const hit=erpFind(it ? it.c : code), name=(it && it.n) || (hit && hit.it.n) || "";
     if(!it){ out.innerHTML=`<div class="sal-res"><div class="it"><b>${esc(code)}</b>${name?" · "+esc(name):""}</div>
       <div class="sub">2022년 이후 판매 기록에서 이 글자가 들어간 품목코드·품명을 찾지 못했습니다.</div></div>`; return; }
+    out.innerHTML=salCardHtml(it, name, from, to, true);
+  }
+  // 품목 하나(또는 합친 묶음)의 판매 카드 — web=false 면 쇼핑몰 찾기 칸을 뺀다
+  function salCardHtml(it, name, from, to, web){
     const r=salSum(it, from, to), today=salYmd(todayISO());
     const fmt=v=>(Math.round(v*100)/100).toLocaleString();
     const co=MmsSp.COMPANIES.map((c,i)=>c+" "+fmt(r.co[i])).join(" · ");
@@ -3618,12 +3625,12 @@ function uploadDoc_(b){
       return `<div class="ord-kpi"><div class="lb">최근 ${n}개월 <span style="font-weight:600">(${salYmdStr(a).slice(0,7)} ~ 오늘)</span></div>
         <div class="vl">${fmt(s.ext)}<span class="u">개</span></div>
         <div class="sb">월평균 ${fmt(s.ext/n)}${s.amt?` · 금액 ₩${Math.round(s.amt).toLocaleString()} · 평균 ₩${Math.round(s.amt/(s.ext||1)).toLocaleString()}/개`:""}${s.inter?` · 내부이동 ${fmt(s.inter)} 별도`:""}</div>${salTop(s,3)}</div>`; }).join("");
-    out.innerHTML=`<div class="sal-res"><div class="sal-row"><div class="l">
+    return `<div class="sal-res"><div class="sal-row"><div class="l">
         <div class="it"><b>${esc(it.c)}</b>${name?" · "+esc(name):""}</div>
         <div class="big">${fmt(r.ext)}<span class="u">개</span>${r.amt?`<span style="font-size:17px;font-weight:700;margin-left:14px;color:var(--ink)">₩${Math.round(r.amt).toLocaleString()}</span><span class="u"> 판매금액(공급가액) · 평균 ₩${Math.round(r.amt/(r.ext||1)).toLocaleString()}/개</span>`:""}</div>
         <div class="sub">${salYmdStr(from)} ~ ${salYmdStr(Math.min(to, today))} 판매량 · ${co} · 판매 ${r.cnt.toLocaleString()}건${r.inter?` · 그룹사 내부이동 ${fmt(r.inter)}개는 제외`:""}</div>
         ${r.ext>0?`<div class="sub" style="margin-top:10px; font-weight:700; color:var(--ink)">판매처 순위</div>${salTop(r,5)}`:""}
-      </div>${salMonthly(it, from, Math.min(to, today))}${salWeb(it.c)}</div></div>
+      </div>${salMonthly(it, from, Math.min(to, today))}${web?salWeb(it.c):""}</div></div>
       <div class="ord-kpis sal-kpis">${kp}</div>`;
   }
   // 입력한 글자가 들어간 품목코드(앞에서부터 맞는 것 먼저), 없으면 품명으로 찾는다
@@ -3638,13 +3645,39 @@ function uploadDoc_(b){
       .sort((x,y)=>x.pre-y.pre || y.q-x.q || x.it.c.localeCompare(y.it.c))
       .map(x=>Object.assign(x.it,{_q12:x.q}));
   }
+  let salSel=null;          // {q, codes} — 목록에서 체크해서 같이 본 품목들
   function salPick(list, q){
     const max=30, fmt=v=>(Math.round(v*100)/100).toLocaleString();
-    $("#salOut").innerHTML=`<div class="sal-list"><div class="hd">'${esc(q)}' 이(가) 들어간 품목 ${list.length.toLocaleString()}개${list.length>max?` — 앞에서부터 맞는 것 · 최근 판매 많은 순으로 ${max}개만`:""} · 눌러서 고르세요</div>`
-      + list.slice(0,max).map(it=>`<button type="button" data-c="${esc(it.c)}"><span class="cd">${esc(it.c)}</span><span class="nm">${esc(it.n||"")}</span><span class="q">최근 12개월 ${fmt(it._q12||0)}개</span></button>`).join("")
+    $("#salOut").innerHTML=`<div class="sal-list"><div class="hd" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="flex:1">'${esc(q)}' 이(가) 들어간 품목 ${list.length.toLocaleString()}개${list.length>max?` — 앞에서부터 맞는 것 · 최근 판매 많은 순으로 ${max}개만`:""} · 품목을 누르면 하나만, ☑ 체크하면 여러 개를 품목별 + 합계로</span>
+        <label style="font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap"><input type="checkbox" id="salAll" style="width:auto;margin:0"> 전체 선택</label>
+        <button type="button" id="salMultiGo" disabled style="opacity:1;width:auto;padding:6px 14px;border:0;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-weight:700;cursor:pointer">선택 품목 보기 (0)</button></div>`
+      + list.slice(0,max).map(it=>`<div style="display:flex;align-items:stretch;border-bottom:1px solid var(--border)">
+          <label style="display:flex;align-items:center;padding:0 4px 0 12px;cursor:pointer"><input type="checkbox" class="salChk" value="${esc(it.c)}" style="width:auto;margin:0"></label>
+          <button type="button" data-c="${esc(it.c)}" style="border-bottom:0"><span class="cd">${esc(it.c)}</span><span class="nm">${esc(it.n||"")}</span><span class="q">최근 12개월 ${fmt(it._q12||0)}개</span></button></div>`).join("")
       + `</div>`;
-    $("#salOut").querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ $("#salCode").value=b.dataset.c; salShow(); });
+    const out=$("#salOut"), chks=()=>[...out.querySelectorAll(".salChk")], go=$("#salMultiGo");
+    const upd=()=>{ const n=chks().filter(c=>c.checked).length; go.disabled=n<1; go.style.opacity=n<1?".45":"1"; go.textContent=`선택 품목 보기 (${n})`; };
+    upd();
+    out.querySelectorAll(".salChk").forEach(c=>c.onchange=upd);
+    $("#salAll").onchange=e=>{ chks().forEach(c=>c.checked=e.target.checked); upd(); };
+    go.onclick=()=>{ const codes=chks().filter(c=>c.checked).map(c=>c.value); if(!codes.length) return;
+      if(codes.length===1){ $("#salCode").value=codes[0]; salShow(); return; }
+      salSel={q:$("#salCode").value.trim(), codes}; salShow(); };
+    out.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ $("#salCode").value=b.dataset.c; salShow(); });
   }
+  // 고른 품목들: 품목별 카드를 차례로, 맨 아래에 모두 합친 카드
+  function salMultiHtml(codes, from, to){
+    const items=codes.map(c=>salIdx[erpKey(c)]).filter(Boolean);
+    const sum={c:"선택 "+items.length+"개 합계", n:"", d:[], q:[], f:[], a:[], v:[]};
+    items.forEach(it=>{ sum.d.push(...it.d); sum.q.push(...it.q); sum.f.push(...it.f); sum.a.push(...(it.a||it.d.map(()=>0))); sum.v.push(...(it.v||it.d.map(()=>0))); });
+    const head=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><button type="button" class="linkbtn" id="salBack">← 목록으로</button>
+      <span style="font-size:12.5px;color:var(--muted)">${items.map(it=>esc(it.c)).join(" · ")}</span></div>`;
+    return head + items.map(it=>salCardHtml(it, it.n||"", from, to, false)).join("")
+      + `<div style="margin:18px 0 8px;font-weight:800;font-size:14px">∑ 합계 — 위 ${items.length}개 품목</div>`
+      + salCardHtml(sum, items.map(it=>it.c).join(", "), from, to, false);
+  }
+  function salBindBack(){ const b=$("#salBack"); if(b) b.onclick=()=>{ salSel=null; salShow(); }; }
   $("#salGo").onclick=async()=>{ if(!salIdx) await salEnsure(false); salShow(); };
   ["salCode","salFrom","salTo"].forEach(id=>$("#"+id).addEventListener("keydown", e=>{ if(e.key==="Enter") $("#salGo").click(); }));
   $("#salQuick").onclick=e=>{
